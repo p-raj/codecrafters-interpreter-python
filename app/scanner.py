@@ -1,5 +1,6 @@
 from enum import StrEnum
 from dataclasses import dataclass
+from .exception import ScannerException, UnterminatedStringLiteral, UnexpectedCharacter
 
 
 class TokenType(StrEnum):
@@ -61,15 +62,6 @@ class Token:
         return self.kind + " " + self.lexeme + " null"
 
 
-@dataclass
-class Error:
-    msg: str
-    line: int
-
-    def __str__(self):
-        return f"[Line {self.line}] {msg}"
-
-
 class Scanner:
     def __init__(self, code: str):
         self.code = code
@@ -77,6 +69,7 @@ class Scanner:
         self.strt = 0
         self.curr = 0
         self.tokens = []
+        self.errors = []
 
     def get_text(self):
         return self.code[self.strt : self.curr]
@@ -103,16 +96,16 @@ class Scanner:
     def add_token(self, kind: TokenType, literal: any = None):
         self.tokens.append(Token(kind, self.get_text(), literal, self.line))
 
-    def add_error(self, err: str):
-        self.tokens.append(Error(err, self.line))
+    def add_error(self, exception):
+        self.errors.append(exception)
 
-    def tokenize(self) -> list[Token | Error]:
+    def tokenize(self) -> tuple(list[Token], list[ScannerException]):
         while not self.is_end():
             self.strt = self.curr
             self._tokenize()
 
         self.tokens.append(Token(TokenType.EOF, "", None, self.line))
-        return self.tokens
+        return self.tokens, self.errors
 
     def is_digit(self, ch: str) -> bool:
         return ch >= "0" and ch <= "9"
@@ -130,7 +123,7 @@ class Scanner:
         if self.peek() == "." and self.is_digit(self.peek(offset=1)):
             self.read()
 
-        while self.is_digit():
+        while self.is_digit(self.peek()):
             self.read()
 
         self.add_token(TokenType.NUMBER, float(self.get_text()))
@@ -224,26 +217,12 @@ class Scanner:
                         self.line += 1
                     str_ += self.read()
                 if self.is_end():
-                    raise UnterminatedStringLiteral(self.line)
+                    self.add_error(UnterminatedStringLiteral(self.line))
                 self.add_token(TokenType.STRING, str_)
             case _:
-                if self.is_digit():
+                if self.is_digit(ch):
                     self.parse_number()
-                elif self.is_alpha():
+                elif self.is_alpha(ch):
                     self.parse_identifier()
                 else:
-                    self.add_error(f"Error: Unexpected character: {ch}")
-
-
-class ScannerException(Exception):
-    pass
-
-
-class UnterminatedStringLiteral(ScannerException):
-    def __init__(self, line: int):
-        super().__init__(f"Unterminated String literal at line {line}")
-
-
-class UnexpectedCharacter(ScannerException):
-    def __init__(self, ch: str, line: int):
-        super().__init__(f"[Line {line}] Error: Unexpected character: {ch}")
+                    self.add_error(UnexpectedCharacter(ch, self.line))

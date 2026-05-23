@@ -1,5 +1,5 @@
 import sys
-from .scanner import Scanner
+from .lox import Lox
 
 
 def main():
@@ -22,9 +22,8 @@ def main():
 
     # TODO: Uncomment the code below to pass the first stage
     if file_contents:
-        tokens = Scanner(file_contents).tokenize()
-        for token in tokens:
-            print(token)
+        Lox().run(file_contents)
+
     else:
         print(
             "EOF  null"
