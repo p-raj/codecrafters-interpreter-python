@@ -155,7 +155,7 @@ class Scanner:
 
         while self.isAlphaNumeric(self.peek()):
             self.read()
-        kind = keywords.get(self.code[self.strt, self.curr])
+        kind = keywords.get(self.get_text())
         if not kind:
             kind = TokenType.IDENTIFIER
         self.add_token(kind)
