@@ -61,6 +61,15 @@ class Token:
         return self.kind + " " + self.lexeme + " null"
 
 
+@dataclass
+class Error:
+    msg: str
+    line: int
+
+    def __str__(self):
+        return f"[Line {self.line}] {msg}"
+
+
 class Scanner:
     def __init__(self, code: str):
         self.code = code
@@ -94,7 +103,10 @@ class Scanner:
     def add_token(self, kind: TokenType, literal: any = None):
         self.tokens.append(Token(kind, self.get_text(), literal, self.line))
 
-    def tokenize(self) -> list[Token]:
+    def add_error(self, err: str):
+        self.tokens.append(Error(err, self.line))
+
+    def tokenize(self) -> list[Token | Error]:
         while not self.is_end():
             self.strt = self.curr
             self._tokenize()
@@ -220,7 +232,7 @@ class Scanner:
                 elif self.is_alpha():
                     self.parse_identifier()
                 else:
-                    raise UnexpectedCharacter(self.line)
+                    self.add_error(f"Error: Unexpected character: {ch}")
 
 
 class ScannerException(Exception):
@@ -233,5 +245,5 @@ class UnterminatedStringLiteral(ScannerException):
 
 
 class UnexpectedCharacter(ScannerException):
-    def __init__(self, line: int):
-        super().__init__(f"Unexpected character at line {line}")
+    def __init__(self, ch: str, line: int):
+        super().__init__(f"[Line {line}] Error: Unexpected character: {ch}")
