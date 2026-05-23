@@ -218,7 +218,9 @@ class Scanner:
                     str_ += self.read()
                 if self.is_end():
                     self.add_error(UnterminatedStringLiteral(self.line))
-                self.add_token(TokenType.STRING, str_)
+                else:
+                    self.read()
+                    self.add_token(TokenType.STRING, str_)
             case _:
                 if self.is_digit(ch):
                     self.parse_number()
