@@ -1,4 +1,5 @@
 import sys
+from .scanner import Scanner
 
 
 def main():
@@ -21,7 +22,9 @@ def main():
 
     # TODO: Uncomment the code below to pass the first stage
     if file_contents:
-        raise NotImplementedError("Scanner not implemented")
+        tokens = Scanner(file_contents).tokenize()
+        for token in tokens:
+            print(token)
     else:
         print(
             "EOF  null"
