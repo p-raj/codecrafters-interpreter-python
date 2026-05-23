@@ -58,8 +58,8 @@ class Token:
 
     def __str__(self):
         if self.literal is not None:
-            return self.kind + " " + self.lexeme + " " + self.literal
-        return self.kind + " " + self.lexeme + " null"
+            return f"{self.kind} {self.lexeme} {self.literal}"
+        return f"{self.kind} {self.lexeme} null"
 
 
 class Scanner:
@@ -107,10 +107,14 @@ class Scanner:
         self.tokens.append(Token(TokenType.EOF, "", None, self.line))
         return self.tokens, self.errors
 
-    def is_digit(self, ch: str) -> bool:
+    def is_digit(self, ch: str | None) -> bool:
+        if ch is None:
+            return False
         return ch >= "0" and ch <= "9"
 
-    def is_alpha(self, ch: str) -> bool:
+    def is_alpha(self, ch: str | None) -> bool:
+        if ch is None:
+            return False
         return (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or ch == "_"
 
     def isAlphaNumeric(self, ch: str) -> bool:
@@ -126,7 +130,8 @@ class Scanner:
         while self.is_digit(self.peek()):
             self.read()
 
-        self.add_token(TokenType.NUMBER, float(self.get_text()))
+        num_ = float(self.get_text())
+        self.add_token(TokenType.NUMBER, num_)
 
     def parse_identifier(self):
         keywords = {
