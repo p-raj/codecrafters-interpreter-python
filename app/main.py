@@ -1,5 +1,11 @@
+from enum import StrEnum
 import sys
 from .lox import Lox
+
+
+class Command(StrEnum):
+    TOKENIZE = "tokenize"
+    PARSE = "parse"
 
 
 def main():
@@ -7,10 +13,10 @@ def main():
         print("Usage: ./your_program.sh tokenize <filename>", file=sys.stderr)
         exit(1)
 
-    command = sys.argv[1]
+    command = Command(sys.argv[1])
     filename = sys.argv[2]
 
-    if command != "tokenize":
+    if command not in {Command.TOKENIZE, Command.PARSE}:
         print(f"Unknown command: {command}", file=sys.stderr)
         exit(1)
 
@@ -21,9 +27,9 @@ def main():
     print("Logs from your program will appear here!", file=sys.stderr)
 
     # TODO: Uncomment the code below to pass the first stage
-    if file_contents:
-        Lox().run(file_contents)
 
+    if file_contents:
+        Lox(command).run(file_contents)
     else:
         print(
             "EOF  null"

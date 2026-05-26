@@ -1,75 +1,16 @@
-from enum import StrEnum
-from dataclasses import dataclass
 from .exception import ScannerException, UnterminatedStringLiteral, UnexpectedCharacter
-
-
-class TokenType(StrEnum):
-    LEFT_PAREN = "LEFT_PAREN"
-    RIGHT_PAREN = "RIGHT_PAREN"
-    LEFT_BRACE = "LEFT_BRACE"
-    RIGHT_BRACE = "RIGHT_BRACE"
-    COMMA = "COMMA"
-    DOT = "DOT"
-    MINUS = "MINUS"
-    PLUS = "PLUS"
-    SEMICOLON = "SEMICOLON"
-    SLASH = "SLASH"
-    STAR = "STAR"
-
-    BANG = "BANG"
-    BANG_EQUAL = "BANG_EQUAL"
-    EQUAL = "EQUAL"
-    EQUAL_EQUAL = "EQUAL_EQUAL"
-    GREATER = "GREATER"
-    GREATER_EQUAL = "GREATER_EQUAL"
-    LESS = "LESS"
-    LESS_EQUAL = "LESS_EQUAL"
-
-    IDENTIFIER = "IDENTIFIER"
-    STRING = "STRING"
-    NUMBER = "NUMBER"
-
-    AND = "AND"
-    CLASS = "CLASS"
-    ELSE = "ELSE"
-    FALSE = "FALSE"
-    FUN = "FUN"
-    FOR = "FOR"
-    IF = "IF"
-    NIL = "NIL"
-    OR = "OR"
-    PRINT = "PRINT"
-    RETURN = "RETURN"
-    SUPER = "SUPER"
-    THIS = "THIS"
-    TRUE = "TRUE"
-    VAR = "VAR"
-    WHILE = "WHILE"
-
-    EOF = "EOF"
-
-
-@dataclass
-class Token:
-    kind: TokenType
-    lexeme: str
-    literal: any
-    line: int
-
-    def __str__(self):
-        if self.literal is not None:
-            return f"{self.kind} {self.lexeme} {self.literal}"
-        return f"{self.kind} {self.lexeme} null"
+from .token import Token, TokenType
+from typing import Callable
 
 
 class Scanner:
-    def __init__(self, code: str):
+    def __init__(self, code: str, error_callback: Callable):
         self.code = code
         self.line = 1
         self.strt = 0
         self.curr = 0
         self.tokens = []
-        self.errors = []
+        self.propagate_err = error_callback
 
     def get_text(self):
         return self.code[self.strt : self.curr]
@@ -96,16 +37,13 @@ class Scanner:
     def add_token(self, kind: TokenType, literal: any = None):
         self.tokens.append(Token(kind, self.get_text(), literal, self.line))
 
-    def add_error(self, exception):
-        self.errors.append(exception)
-
     def tokenize(self) -> tuple(list[Token], list[ScannerException]):
         while not self.is_end():
             self.strt = self.curr
             self._tokenize()
 
         self.tokens.append(Token(TokenType.EOF, "", None, self.line))
-        return self.tokens, self.errors
+        return self.tokens
 
     def is_digit(self, ch: str | None) -> bool:
         if ch is None:
@@ -222,7 +160,7 @@ class Scanner:
                         self.line += 1
                     str_ += self.read()
                 if self.is_end():
-                    self.add_error(UnterminatedStringLiteral(self.line))
+                    self.propagate_err(UnterminatedStringLiteral(self.line))
                 else:
                     self.read()
                     self.add_token(TokenType.STRING, str_)
@@ -232,4 +170,4 @@ class Scanner:
                 elif self.is_alpha(ch):
                     self.parse_identifier()
                 else:
-                    self.add_error(UnexpectedCharacter(ch, self.line))
+                    self.propagate_err(UnexpectedCharacter(ch, self.line))
