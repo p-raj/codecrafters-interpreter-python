@@ -56,13 +56,13 @@ class Interpreter(Visitor[str]):
     # validators
     ##############################
     def check_number_operand(self, operator: Token, operand: object):
-        if (
-            isinstance(operand, float)
-            or isinstance(operand, int)
-            or isinstance(ast.literal_eval(str(operand)), float)
-            or isinstance(ast.literal_eval(str(operand)), int)
-        ):
-            return
+        try:
+            if isinstance(operand, bool):
+                raise ValueError
+            if isinstance(operand, float) or isinstance(operand, int):
+                return
+        except ValueError:
+            pass
         raise InterpreterException(operator, "Operand must be a number.")
 
     def check_number_operands(self, operator: Token, left: object, right: object):
@@ -137,6 +137,7 @@ class Interpreter(Visitor[str]):
 
         match expr.operator.kind:
             case TokenType.MINUS:
+                self.check_number_operand(expr.operator, right)
                 return -(float(right))
             case TokenType.BANG:
                 return not (self.is_truthy(right))
