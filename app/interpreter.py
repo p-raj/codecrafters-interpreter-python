@@ -26,7 +26,7 @@ class Interpreter(Visitor[str]):
         if value is None:
             return "nil"
         if isinstance(value, float):
-            n, d = str(value).split(".")[-1]
+            n, d = str(value).split(".")
             if d == "0":
                 # this is int
                 return n
