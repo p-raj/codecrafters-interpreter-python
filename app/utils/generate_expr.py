@@ -141,10 +141,13 @@ def _write_expr_subclass_property(file, expr_map):
 def generate_expr():
     file_path = Path(__file__).resolve().parent.parent / "expr.py"
     map_ = {
+        "Comma": ["Expr left", "Expr right"],
+        "Ternary": ["Expr condition", "Expr then_branch", "Expr else_branch"],
         "Binary": ["Expr left", "Token operator", "Expr right"],
         "Grouping": ["Expr expression"],
         "Literal": ["object value"],
         "Unary": ["Token operator", "Expr right"],
+        "Variable": ["Token name"],
     }
 
     with open(file_path, "w") as file:

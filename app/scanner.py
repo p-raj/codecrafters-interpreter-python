@@ -121,6 +121,10 @@ class Scanner:
                 self.add_token(TokenType.PLUS)
             case "*":
                 self.add_token(TokenType.STAR)
+            case "?":
+                self.add_token(TokenType.QUESTION)
+            case ":":
+                self.add_token(TokenType.COLON)
             case "/":
                 if self.is_match("/"):
                     while self.peek() != "\n" and not self.is_end():

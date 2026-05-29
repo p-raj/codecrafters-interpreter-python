@@ -34,3 +34,8 @@ class ParserException(Exception):
             super().__init__(Error(msg=message, line=token.line, loc="at end"))
         else:
             super().__init__(Error(msg=message, line=token.line, loc=token.lexeme))
+
+
+class InterpreterException(Exception):
+    def __init__(self, token: Token, message: str):
+        super().__init__(Error(msg=message, line=token.line))

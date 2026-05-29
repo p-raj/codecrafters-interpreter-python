@@ -15,6 +15,8 @@ class TokenType(StrEnum):
     SEMICOLON = "SEMICOLON"
     SLASH = "SLASH"
     STAR = "STAR"
+    QUESTION = "QUESTION"
+    COLON = "COLON"
 
     BANG = "BANG"
     BANG_EQUAL = "BANG_EQUAL"

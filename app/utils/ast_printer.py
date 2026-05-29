@@ -1,4 +1,14 @@
-from app.expr import Visitor, Expr, Binary, Grouping, Literal, Unary
+from app.expr import (
+    Visitor,
+    Expr,
+    Binary,
+    Grouping,
+    Literal,
+    Unary,
+    Comma,
+    Ternary,
+    Variable,
+)
 from app.token import Token, TokenType
 
 
@@ -27,10 +37,25 @@ class AstPrinter(Visitor[str]):
     def visit_literal_expr(self, expr: Literal) -> str:
         if expr.value is None:
             return "nil"
+        elif expr.value is True:
+            return "true"
+        elif expr.value is False:
+            return "false"
         return str(expr.value)
 
     def visit_unary_expr(self, expr: Unary) -> str:
         return self.parenthesize(expr.operator.lexeme, expr.right)
+
+    def visit_comma_expr(self, expr: Comma) -> str:
+        return self.parenthesize(",", expr.left, expr.right)
+
+    def visit_ternary_expr(self, expr: Ternary) -> str:
+        return self.parenthesize(
+            "?:", expr.condition, expr.then_branch, expr.else_branch
+        )
+
+    def visit_variable_expr(self, expr: Variable) -> str:
+        return expr.name.lexeme
 
 
 if __name__ == "__main__":

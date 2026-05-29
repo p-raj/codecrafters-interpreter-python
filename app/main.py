@@ -6,6 +6,7 @@ from .lox import Lox
 class Command(StrEnum):
     TOKENIZE = "tokenize"
     PARSE = "parse"
+    EVAL = "evaluate"
 
 
 def main():
@@ -16,7 +17,7 @@ def main():
     command = Command(sys.argv[1])
     filename = sys.argv[2]
 
-    if command not in {Command.TOKENIZE, Command.PARSE}:
+    if command not in Command.__members__.values():
         print(f"Unknown command: {command}", file=sys.stderr)
         exit(1)
 

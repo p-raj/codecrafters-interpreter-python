@@ -101,7 +101,32 @@ class Parser:
     # expression grammar
     ######################
     def expression(self) -> Expr:
-        return self.equality()
+        return self.comma()
+
+    def comma(self) -> Expr:
+        # comma -> (literal <- evaluated and ignored, literal <- used as result)
+        # comma      → assignment ( "," assignment )* ;
+        expr = self.assignment()
+        while self.match(TokenType.COMMA):
+            right: Expr = self.assignment()
+            expr = Expr.Comma(expr, right)
+
+        return expr
+
+    def assignment(self) -> Expr:
+        # assignment → IDENTIFIER "=" assignment | equality ;
+        return self.ternary()
+
+    def ternary(self) -> Expr:
+        # right-associative
+        # ternary -> (a + b) ? c : d
+        expr = self.equality()
+        if self.match(TokenType.QUESTION):
+            then_branch = self.expression()
+            self.consume(TokenType.COLON, "Expect ':' after then branch.")
+            else_branch = self.ternary()
+            expr = Expr.Ternary(expr, then_branch, else_branch)
+        return expr
 
     def equality(self) -> Expr:
         # equality       → comparison ( ( "!=" | "==" ) comparison )* ;
@@ -171,16 +196,64 @@ class Parser:
     def primary(self) -> Expr:
         # primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
         if self.match(TokenType.FALSE):
-            return Expr.Literal("false")
+            return Expr.Literal(False)
         elif self.match(TokenType.TRUE):
-            return Expr.Literal("true")
+            return Expr.Literal(True)
         elif self.match(TokenType.NIL):
-            return Expr.Literal("nil")
+            return Expr.Literal(None)
         elif self.match(TokenType.NUMBER, TokenType.STRING):
             return Expr.Literal(self.previous().literal)
         elif self.match(TokenType.LEFT_PAREN):
             expr: Expr = self.expression()
             self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.")
             return Expr.Grouping(expr)
+        elif self.match(TokenType.IDENTIFIER):
+            return Expr.Variable(self.previous())
 
+        # Error productions for missing left operands.
+
+        if self.match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL):
+            operator = self.previous()
+            self.comparison()
+            raise ParserException(operator, "Missing left-hand operand.")
+
+        if self.match(
+            TokenType.GREATER,
+            TokenType.GREATER_EQUAL,
+            TokenType.LESS,
+            TokenType.LESS_EQUAL,
+        ):
+            operator = self.previous()
+            self.term()
+            raise ParserException(operator, "Missing left-hand operand.")
+
+        if self.match(TokenType.PLUS, TokenType.MINUS):
+            operator = self.previous()
+            self.factor()
+            raise ParserException(operator, "Missing left-hand operand.")
+
+        if self.match(TokenType.STAR, TokenType.SLASH):
+            operator = self.previous()
+            self.unary()
+            raise ParserException(operator, "Missing left-hand operand.")
+
+        if self.match(TokenType.COMMA):
+            operator = self.previous()
+            self.assignment()
+            raise ParserException(operator, "Missing left-hand operand.")
+
+        if self.match(TokenType.QUESTION):
+            operator = self.previous()
+            self.expression()
+            if self.match(TokenType.COLON):
+                self.ternary()
+            raise ParserException(operator, "Missing condition before '?'.")
+
+        if self.match(TokenType.COLON):
+            operator = self.previous()
+            self.ternary()
+            raise ParserException(
+                operator,
+                "MiParserException(ssing condition and then-branch before ':'.",
+            )
         raise ParserException(self.peek(), "Expect expression.")
