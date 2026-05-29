@@ -106,11 +106,9 @@ class Interpreter(Visitor[str]):
                     expr.operator, "Operands must be two numbers or two strings."
                 )
             case TokenType.BANG_EQUAL:
-                self.check_number_operands(expr.operator, left, right)
-                return float(left) != float(right)
+                return not self.is_equal(left, right)
             case TokenType.EQUAL_EQUAL:
-                self.check_number_operands(expr.operator, left, right)
-                return float(left) == float(right)
+                return self.is_equal(left, right)
             case TokenType.GREATER:
                 self.check_number_operands(expr.operator, left, right)
                 return float(left) > float(right)
