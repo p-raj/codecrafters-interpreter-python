@@ -1,3 +1,4 @@
+from enum import StrEnum
 from pathlib import Path
 
 """
@@ -14,6 +15,11 @@ BR = "\n"
 GTYPE = "R"
 
 
+class BaseClass(StrEnum):
+    EXPR = "Expr"
+    STMT = "Stmt"
+
+
 def _tab(file, count=1):
     file.write(STAB * count)
 
@@ -22,7 +28,7 @@ def _breakline(file, count=1):
     file.write(BR * count)
 
 
-def _write_visitor_protocol(file, expr_map):
+def _write_visitor_protocol(file, base_class: BaseClass, expr_map):
     """
     interface Visitor<R> {
         R visitAssignExpr(Assign expr);
@@ -46,15 +52,15 @@ def _write_visitor_protocol(file, expr_map):
         _breakline(file)
         _tab(file)
         file.write(
-            f"def visit_{cls_name.lower()}_expr(self, expr: {cls_name}) -> {GTYPE}: ..."
+            f"def visit_{cls_name.lower()}_{base_class.value.lower()}(self, {base_class.value.lower()}: {cls_name}) -> {GTYPE}: ..."
         )
     _breakline(file, 2)
 
 
-def _write_expr_base(file):
+def _write_base_class(file, base_class: BaseClass):
     file.writelines(
         [
-            "class Expr(ABC):",
+            f"class {base_class.value}(ABC):",
             BR,
             STAB,
             "",
@@ -77,14 +83,14 @@ def _write_imports(file):
             BR,
             "from .token import Token",
             BR,
-            "from typing import Protocol, TypeVar",
+            "from typing import Protocol, TypeVar, List",
             BR,
         ]
     )
     _breakline(file, 2)
 
 
-def _write_docstring(file):
+def _write_expr_docstring(file):
     file.write('"""')
     _breakline(file)
     file.writelines(
@@ -108,18 +114,40 @@ def _write_docstring(file):
     _breakline(file, 3)
 
 
-def _write_expr_subclass(file, map_):
+def _write_stmt_docstring(file):
+    file.write('"""')
+    _breakline(file)
+    file.writelines(
+        [
+            "program        → declaration* EOF ;",
+            BR,
+            "declaration    → varDecl | statement ;",
+            BR,
+            'varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;',
+            BR,
+            "statement      → exprStmt | printStmt ;",
+            BR,
+            "exprStmt       → expression <;> ;",
+            BR,
+            "printStmt      → print expression <;> ;",
+            BR,
+        ]
+    )
+    _breakline(file)
+    file.write('"""')
+    _breakline(file, 3)
+
+
+def _write_expr_subclass(file, base_class: BaseClass, map_):
     for cls_name, params in map_.items():
         file.write("@dataclass(frozen=True)")
         _breakline(file)
-        file.write(f"class {cls_name}(Expr):")
+        file.write(f"class {cls_name}({base_class.value}):")
         _breakline(file)
         for param in params:
             _tab(file)
             p_ = param.strip().split()
             file.write(f"{p_[1]}: {p_[0]}")
-            # def accept(self, visitor: Visitor[R]) -> R:
-            #     return visitor.visit_binary_expr(self)
             _breakline(file)
 
         _breakline(file)
@@ -127,19 +155,25 @@ def _write_expr_subclass(file, map_):
         file.write(f"def accept(self, visitor: Visitor[{GTYPE}]) -> {GTYPE}:")
         _breakline(file)
         _tab(file, 2)
-        file.write(f"return visitor.visit_{cls_name.lower()}_expr(self)")
+        file.write(
+            f"return visitor.visit_{cls_name.lower()}_{base_class.value.lower()}(self)"
+        )
         _breakline(file, 3)
 
 
-def _write_expr_subclass_property(file, expr_map):
+def _write_expr_subclass_property(file, base_class: BaseClass, expr_map):
     for cls_name in expr_map:
         _breakline(file)
-        file.write(f"Expr.{cls_name} = {cls_name}")
+        file.write(f"{base_class.value}.{cls_name} = {cls_name}")
     _breakline(file, 2)
 
 
-def generate_expr():
-    file_path = Path(__file__).resolve().parent.parent / "expr.py"
+def generate_common(file_path: Path):
+    with open(file_path, "w") as file:
+        _write_imports(file)
+
+
+def generate_expr(file_path: Path):
     map_ = {
         "Comma": ["Expr left", "Expr right"],
         "Ternary": ["Expr condition", "Expr then_branch", "Expr else_branch"],
@@ -148,16 +182,39 @@ def generate_expr():
         "Literal": ["object value"],
         "Unary": ["Token operator", "Expr right"],
         "Variable": ["Token name"],
+        "Assign": ["Token name", "Expr value"],
     }
 
-    with open(file_path, "w") as file:
-        _write_imports(file)
-        _write_docstring(file)
-        _write_expr_base(file)
-        _write_expr_subclass(file, map_)
-        _write_expr_subclass_property(file, map_)
-        _write_visitor_protocol(file, map_)
+    with open(file_path, "a") as file:
+        _write_expr_docstring(file)
+        _write_base_class(file, BaseClass.EXPR)
+        _write_expr_subclass(file, BaseClass.EXPR, map_)
+        _write_expr_subclass_property(file, BaseClass.EXPR, map_)
+        _write_visitor_protocol(file, BaseClass.EXPR, map_)
+
+
+def generate_stms(file_path: Path):
+    map_ = {
+        "Expression": ["Expr expression"],
+        "Print": ["Expr expression"],
+        "Var": ["Token name", "Expr initializer"],
+        "Block": ["List[Stmt] statements"],
+    }
+
+    with open(file_path, "a") as file:
+        file.write("from .expr import Expr")
+        _breakline(file, 2)
+        _write_stmt_docstring(file)
+        _write_base_class(file, BaseClass.STMT)
+        _write_expr_subclass(file, BaseClass.STMT, map_)
+        _write_expr_subclass_property(file, BaseClass.STMT, map_)
+        _write_visitor_protocol(file, BaseClass.STMT, map_)
 
 
 if __name__ == "__main__":
-    generate_expr()
+    expr_file_path = Path(__file__).resolve().parent.parent / "expr.py"
+    stmt_file_path = Path(__file__).resolve().parent.parent / "stmt.py"
+    generate_common(expr_file_path)
+    generate_common(stmt_file_path)
+    generate_expr(expr_file_path)
+    generate_stms(stmt_file_path)

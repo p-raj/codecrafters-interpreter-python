@@ -7,6 +7,7 @@ class Command(StrEnum):
     TOKENIZE = "tokenize"
     PARSE = "parse"
     EVAL = "evaluate"
+    RUN = "run"
 
 
 def main():

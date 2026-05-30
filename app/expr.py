@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from .token import Token
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, List
 
 
 """
@@ -82,6 +82,15 @@ class Variable(Expr):
         return visitor.visit_variable_expr(self)
 
 
+@dataclass(frozen=True)
+class Assign(Expr):
+    name: Token
+    value: Expr
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_assign_expr(self)
+
+
 
 Expr.Comma = Comma
 Expr.Ternary = Ternary
@@ -90,6 +99,7 @@ Expr.Grouping = Grouping
 Expr.Literal = Literal
 Expr.Unary = Unary
 Expr.Variable = Variable
+Expr.Assign = Assign
 
 R = TypeVar("R")
 
@@ -102,4 +112,5 @@ class Visitor(Protocol[R]):
     def visit_literal_expr(self, expr: Literal) -> R: ...
     def visit_unary_expr(self, expr: Unary) -> R: ...
     def visit_variable_expr(self, expr: Variable) -> R: ...
+    def visit_assign_expr(self, expr: Assign) -> R: ...
 

@@ -3,6 +3,7 @@ from .scanner import Scanner
 from .exception import Error
 from .parser import Parser
 from .expr import Expr
+from .stmt import Stmt
 from .utils.ast_printer import AstPrinter
 from typing import Literal
 from .interpreter import Interpreter
@@ -10,7 +11,9 @@ from .token import Token
 
 
 class Lox:
-    def __init__(self, mode: Literal["parse", "tokenize"] = "tokenize"):
+    def __init__(
+        self, mode: Literal["parse", "tokenize", "evaluate", "run"] = "tokenize"
+    ):
         self.has_err = False
         self.command = mode
         self.has_rt_err = False
@@ -32,7 +35,7 @@ class Lox:
         if self.command == "parse":
             tokens: list[Token] = Scanner(code, self.error).tokenize()
             parser: Parser = Parser(tokens, self.error)
-            expression: Expr = parser.parse()
+            expression: Expr = parser.parsee()
 
             if self.has_err:
                 return
@@ -42,12 +45,22 @@ class Lox:
         if self.command == "evaluate":
             tokens: list[Token] = Scanner(code, self.error).tokenize()
             parser: Parser = Parser(tokens, self.error)
-            expression: Expr = parser.parse()
+            expression: Expr = parser.parsee()
             if self.has_err:
                 return
 
             intepreter: Interpreter = Interpreter(self.intepreter_error)
-            intepreter.interpret(expression)
+            intepreter.interprete(expression)
+
+        if self.command == "run":
+            tokens: list[Token] = Scanner(code, self.error).tokenize()
+            parser: Parser = Parser(tokens, self.error)
+            statements: list[Stmt] = parser.parses()
+            if self.has_err:
+                return
+
+            intepreter: Interpreter = Interpreter(self.intepreter_error)
+            intepreter.interprets(statements)
 
     def _report(self, error: Error):
         print(error, file=sys.stderr)

@@ -1,26 +1,35 @@
 from typing import override
-from app.expr import Visitor, Expr
+from app.expr import Visitor as EVisitor, Expr
+from app.stmt import Visitor as SVisitor, Stmt
 from app.token import TokenType, Token
 from app.exception import InterpreterException
+from app.environment import Environment
 from typing import Callable
-import ast
 
 
-class Interpreter(Visitor[str]):
+class Interpreter(EVisitor[str], SVisitor[None]):
     def __init__(self, error_callback: Callable):
         self.propagate_err = error_callback
+        self.environment = Environment()
 
     ##############################
     # main
     ##############################
-    def interpret(self, expr: Expr):
+    def interprete(self, expr: Expr):
         try:
             print(self.stringify(self.evaluate(expr)))
         except InterpreterException as e:
             self.propagate_err(e)
 
+    def interprets(self, stmts: list[Stmt]):
+        try:
+            for stmt in stmts:
+                self.execute(stmt)
+        except InterpreterException as e:
+            self.propagate_err(e)
+
     ##############################
-    # helpers
+    # helpers | generic
     ##############################
     def stringify(self, value: object) -> str:
         if value is None:
@@ -32,9 +41,26 @@ class Interpreter(Visitor[str]):
                 return n
         if isinstance(value, bool):
             return str(value).lower()
-
         return str(value)
 
+    ##############################
+    # helpers | Stmt
+    ##############################
+    def execute(self, stmt: Stmt) -> None:
+        stmt.accept(self)
+
+    def execute_block(self, stmts: list[Stmt], env: Environment) -> None:
+        prev: Environment = self.environment
+        try:
+            self.environment = env
+            for stmt in stmts:
+                self.execute(stmt)
+        finally:
+            self.environment = prev
+
+    ##############################
+    # helpers | Expr
+    ##############################
     def evaluate(self, expr: Expr) -> object:
         return expr.accept(self)
 
@@ -70,7 +96,7 @@ class Interpreter(Visitor[str]):
         self.check_number_operand(operator, right)
 
     ##############################
-    # visitor overrides
+    # visitor overrides | Expression
     ##############################
     @override
     def visit_comma_expr(self, expr: Expr.Comma) -> object:
@@ -145,4 +171,32 @@ class Interpreter(Visitor[str]):
 
     @override
     def visit_variable_expr(self, expr: Expr.Variable) -> object:
-        pass
+        self.environment.get(expr.name)
+
+    @override
+    def visit_assign_expr(self, expr: Expr.Assign) -> object:
+        value: object = self.evaluate(expr.value)
+        self.environment.assign(expr.name, value)
+        return value
+
+    ##############################
+    # visitor overrides | Statement
+    ##############################
+    @override
+    def visit_expression_stmt(self, stmt: Stmt.Expression) -> None:
+        self.evaluate(stmt.expression)
+
+    @override
+    def visit_print_stmt(self, stmt: Stmt.Print) -> None:
+        print(self.stringify(self.evaluate(stmt.expression)))
+
+    @override
+    def visit_var_stmt(self, stmt: Stmt.Var) -> None:
+        value: object = None
+        if stmt.initializer is not None:
+            value = self.evaluate(stmt.initializer)
+        self.environment.define(stmt.name.lexeme, value)
+
+    @override
+    def visit_block_stmt(self, stmt: Stmt.Block) -> None:
+        self.execute_block(stmt.statements, Environment(self.environment))

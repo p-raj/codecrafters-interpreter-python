@@ -1,16 +1,18 @@
 from .token import Token, TokenType
 from .expr import Expr
+from .stmt import Stmt
 from .exception import ParserException
 from typing import Callable
 
 """
-expression     → equality ;
+expression     → assignment ;
+assignment     → IDENTIFIER "=" assignment | equality;
 equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 term           → factor ( ( "-" | "+" ) factor )* ;
 factor         → unary ( ( "/" | "*" ) unary )* ;
 unary          → ( "!" | "-" ) unary | primary ;
-primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
+primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
 """
 
 
@@ -35,12 +37,18 @@ class Parser:
         self.current = 0
         self.propagate_err = error_callback
 
-    def parse(self):
+    def parsee(self):
         try:
             return self.expression()
         except ParserException as e:
             self.propagate_err(e)
             return None
+
+    def parses(self) -> list[Stmt]:
+        statements = []
+        while not self.is_at_end():
+            statements.append(self.declaration())
+        return statements
 
     ######################
     # utils
@@ -97,6 +105,50 @@ class Parser:
                     return
             self.advance()
 
+    def block(self) -> list[Stmt]:
+        statements: list[Stmt] = []
+        while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
+            statements.append(self.declaration())
+        self.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.")
+        return statements
+
+    ######################
+    # statement grammar
+    ######################
+    def declaration(self) -> Stmt:
+        try:
+            if self.match(TokenType.VAR):
+                return self.var_declaration()
+            return self.statement()
+        except ParserException as e:
+            self.propagate_err(e)
+            self.synchronize()
+
+    def statement(self) -> Stmt:
+        if self.match(TokenType.PRINT):
+            return self.print_statement()
+        if self.match(TokenType.LEFT_BRACE):
+            return Stmt.Block(self.block())
+        return self.expression_statement()
+
+    def var_declaration(self) -> Stmt:
+        name: Token = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
+        initializer: Expr = None
+        if self.match(TokenType.EQUAL):
+            initializer = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
+        return Stmt.Var(name, initializer)
+
+    def print_statement(self) -> Stmt:
+        value: Expr = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
+        return Stmt.Print(value)
+
+    def expression_statement(self) -> Stmt:
+        expr: Expr = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
+        return Stmt.Expression(expr)
+
     ######################
     # expression grammar
     ######################
@@ -114,8 +166,18 @@ class Parser:
         return expr
 
     def assignment(self) -> Expr:
-        # assignment → IDENTIFIER "=" assignment | equality ;
-        return self.ternary()
+        # assignment → IDENTIFIER "=" assignment | ternary ;
+        expr: Expr = self.ternary()
+
+        if self.match(TokenType.EQUAL):
+            eq: Token = self.previous()
+            val: Expr = self.assignment()
+
+            if isinstance(expr, Expr.Variable):
+                return Expr.Assign(expr.name, val)
+            raise ParserException(eq, "Invalid assignment target.")
+
+        return expr
 
     def ternary(self) -> Expr:
         # right-associative
@@ -194,7 +256,7 @@ class Parser:
         return self.primary()
 
     def primary(self) -> Expr:
-        # primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
+        # primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
         if self.match(TokenType.FALSE):
             return Expr.Literal(False)
         elif self.match(TokenType.TRUE):
