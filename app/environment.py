@@ -21,9 +21,9 @@ class Environment:
                 name, "Undefined variable '" + name.lexeme + "'."
             )
 
-    def assign(self, name: str, value: object):
+    def assign(self, name: Token, value: object):
         if self.enclosing:
             self.enclosing.assign(name, object)
         else:
             self.get(name)
-            self.define(name, value)
+            self.define(name.lexeme, value)
