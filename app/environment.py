@@ -16,7 +16,7 @@ class Environment:
             return self.values[name.lexeme]
             if self.enclosing:
                 return self.enclosing.get(name)
-        except ValueError:
+        except KeyError:
             raise InterpreterException(
                 name, "Undefined variable '" + name.lexeme + "'."
             )
