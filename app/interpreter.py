@@ -171,7 +171,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
 
     @override
     def visit_variable_expr(self, expr: Expr.Variable) -> object:
-        self.environment.get(expr.name)
+        return self.environment.get(expr.name)
 
     @override
     def visit_assign_expr(self, expr: Expr.Assign) -> object:
