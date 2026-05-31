@@ -105,8 +105,22 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         return right
 
     @override
+    def visit_logical_expr(self, expr: Expr.Logic) -> object:
+        left: object = self.evaluate(expr.left)
+        match expr.operator.kind:
+            case TokenType.OR:
+                if self.is_truthy(left):
+                    return left
+            case TokenType.AND:
+                if not self.is_truthy(left):
+                    return left
+        return self.evaluate(expr.right)
+
+    @override
     def visit_ternary_expr(self, expr: Expr.Ternary) -> object:
-        pass
+        if self.is_truthy(self.evaluate(expr.condition)):
+            return self.evaluate(expr.then_branch)
+        return self.evaluate(expr.else_branch)
 
     @override
     def visit_binary_expr(self, expr: Expr.Binary) -> object:
@@ -200,3 +214,15 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     @override
     def visit_block_stmt(self, stmt: Stmt.Block) -> None:
         self.execute_block(stmt.statements, Environment(self.environment))
+
+    @override
+    def visit_if_stmt(self, stmt: Stmt.If) -> None:
+        if self.is_truthy(self.evaluate(stmt.condition)):
+            self.execute(stmt.then_branch)
+        elif stmt.else_branch:
+            self.execute(stmt.else_branch)
+
+    @override
+    def visit_while_stmt(self, stmt: Stmt.While) -> None:
+        while self.is_truthy(self.evaluate(stmt.condition)):
+            self.execute(stmt.body)

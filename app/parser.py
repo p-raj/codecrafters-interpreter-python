@@ -125,8 +125,14 @@ class Parser:
             self.synchronize()
 
     def statement(self) -> Stmt:
+        if self.match(TokenType.IF):
+            return self.if_statement()
         if self.match(TokenType.PRINT):
             return self.print_statement()
+        if self.match(TokenType.WHILE):
+            return self.while_statement()
+        if self.match(TokenType.FOR):
+            return self.for_statement()
         if self.match(TokenType.LEFT_BRACE):
             return Stmt.Block(self.block())
         return self.expression_statement()
@@ -149,6 +155,62 @@ class Parser:
         self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
         return Stmt.Expression(expr)
 
+    def if_statement(self) -> Stmt:
+        # ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'if'.")
+        condition: Expr = self.expression()
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after if condition.")
+        then_branch: Stmt = self.statement()
+        else_branch: Stmt = None
+        if self.match(TokenType.ELSE):
+            else_branch = self.statement()
+        return Stmt.If(condition, then_branch, else_branch)
+
+    def while_statement(self) -> Stmt:
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'while'.")
+        condition: Expr = self.expression()
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after condition.")
+        body: Stmt = self.statement()
+        return Stmt.While(condition, body)
+
+    # forStmt → "for" "(" ( varDecl | exprStmt | ";" ) expression? ";" expression? ")" statement ;
+    def for_statement(self) -> Stmt:
+        # desugring concept
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.")
+
+        initializer: Stmt = None
+        if self.match(TokenType.SEMICOLON):
+            initializer = None
+        elif self.match(TokenType.VAR):
+            initializer = self.var_declaration()
+        else:
+            initializer = self.expression_statement()
+
+        condition: Expr = None
+        if not self.check(TokenType.SEMICOLON):
+            condition = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after loop condition.")
+
+        incr: Expr = None
+        if not self.check(TokenType.RIGHT_PAREN):
+            incr = self.expression()
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.")
+
+        body: Stmt = self.statement()
+
+        if incr is not None:
+            body = Stmt.Block([body, Stmt.Expression(incr)])
+
+        if condition is None:
+            condition = Expr.Literal(True)
+
+        body = Stmt.While(condition, body)
+
+        if initializer is not None:
+            body = Stmt.Block([initializer, body])
+
+        return body
+
     ######################
     # expression grammar
     ######################
@@ -166,8 +228,8 @@ class Parser:
         return expr
 
     def assignment(self) -> Expr:
-        # assignment → IDENTIFIER "=" assignment | ternary ;
-        expr: Expr = self.ternary()
+        # assignment → IDENTIFIER "=" assignment | logic_or;
+        expr: Expr = self.logic_or()
 
         if self.match(TokenType.EQUAL):
             eq: Token = self.previous()
@@ -177,6 +239,24 @@ class Parser:
                 return Expr.Assign(expr.name, val)
             raise ParserException(eq, "Invalid assignment target.")
 
+        return expr
+
+    # logic_or       → logic_and ( "or" logic_and )* ;
+    def logic_or(self) -> Expr:
+        expr: Expr = self.logic_and()
+        while self.match(TokenType.OR):
+            operator: Token = self.previous()
+            right: Expr = self.logic_and()
+            expr = Expr.Logical(expr, operator, right)
+        return expr
+
+    # logic_and      → ternary ( "and" ternary )* ;
+    def logic_and(self) -> Expr:
+        expr: Expr = self.ternary()
+        while self.match(TokenType.AND):
+            operator: Token = self.previous()
+            right: Expr = self.ternary()
+            expr = Expr.Logical(expr, operator, right)
         return expr
 
     def ternary(self) -> Expr:
@@ -316,6 +396,6 @@ class Parser:
             self.ternary()
             raise ParserException(
                 operator,
-                "MiParserException(ssing condition and then-branch before ':'.",
+                "Missing condition and then-branch before ':'.",
             )
         raise ParserException(self.peek(), "Expect expression.")

@@ -30,6 +30,16 @@ class Comma(Expr):
 
 
 @dataclass(frozen=True)
+class Logical(Expr):
+    left: Expr
+    operator: Token
+    right: Expr
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_logical_expr(self)
+
+
+@dataclass(frozen=True)
 class Ternary(Expr):
     condition: Expr
     then_branch: Expr
@@ -93,6 +103,7 @@ class Assign(Expr):
 
 
 Expr.Comma = Comma
+Expr.Logical = Logical
 Expr.Ternary = Ternary
 Expr.Binary = Binary
 Expr.Grouping = Grouping
@@ -106,6 +117,7 @@ R = TypeVar("R")
 
 class Visitor(Protocol[R]):
     def visit_comma_expr(self, expr: Comma) -> R: ...
+    def visit_logical_expr(self, expr: Logical) -> R: ...
     def visit_ternary_expr(self, expr: Ternary) -> R: ...
     def visit_binary_expr(self, expr: Binary) -> R: ...
     def visit_grouping_expr(self, expr: Grouping) -> R: ...

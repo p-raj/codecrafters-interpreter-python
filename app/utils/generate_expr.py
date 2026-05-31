@@ -125,7 +125,9 @@ def _write_stmt_docstring(file):
             BR,
             'varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;',
             BR,
-            "statement      → exprStmt | printStmt ;",
+            "statement      → exprStmt | ifStmt | printStmt | block;",
+            BR,
+            'ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;',
             BR,
             "exprStmt       → expression <;> ;",
             BR,
@@ -176,6 +178,7 @@ def generate_common(file_path: Path):
 def generate_expr(file_path: Path):
     map_ = {
         "Comma": ["Expr left", "Expr right"],
+        "Logical": ["Expr left", "Token operator", "Expr right"],
         "Ternary": ["Expr condition", "Expr then_branch", "Expr else_branch"],
         "Binary": ["Expr left", "Token operator", "Expr right"],
         "Grouping": ["Expr expression"],
@@ -199,6 +202,8 @@ def generate_stms(file_path: Path):
         "Print": ["Expr expression"],
         "Var": ["Token name", "Expr initializer"],
         "Block": ["List[Stmt] statements"],
+        "If": ["Expr condition", "Stmt then_branch", "Stmt else_branch"],
+        "While": ["Expr condition", "Stmt body"],
     }
 
     with open(file_path, "a") as file:

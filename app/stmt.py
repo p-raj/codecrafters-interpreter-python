@@ -10,7 +10,8 @@ from .expr import Expr
 program        → declaration* EOF ;
 declaration    → varDecl | statement ;
 varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
-statement      → exprStmt | printStmt ;
+statement      → exprStmt | ifStmt | printStmt | block;
+ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;
 exprStmt       → expression <;> ;
 printStmt      → print expression <;> ;
 
@@ -55,11 +56,32 @@ class Block(Stmt):
         return visitor.visit_block_stmt(self)
 
 
+@dataclass(frozen=True)
+class If(Stmt):
+    condition: Expr
+    then_branch: Stmt
+    else_branch: Stmt
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_if_stmt(self)
+
+
+@dataclass(frozen=True)
+class While(Stmt):
+    condition: Expr
+    body: Stmt
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_while_stmt(self)
+
+
 
 Stmt.Expression = Expression
 Stmt.Print = Print
 Stmt.Var = Var
 Stmt.Block = Block
+Stmt.If = If
+Stmt.While = While
 
 R = TypeVar("R")
 
@@ -69,4 +91,6 @@ class Visitor(Protocol[R]):
     def visit_print_stmt(self, stmt: Print) -> R: ...
     def visit_var_stmt(self, stmt: Var) -> R: ...
     def visit_block_stmt(self, stmt: Block) -> R: ...
+    def visit_if_stmt(self, stmt: If) -> R: ...
+    def visit_while_stmt(self, stmt: While) -> R: ...
 

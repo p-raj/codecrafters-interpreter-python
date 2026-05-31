@@ -85,6 +85,9 @@ class AstPrinter(EVisitor[str], SVisitor[str]):
             expr.value,
         )
 
+    def visit_logical_expr(self, expr: Expr.Logical) -> str:
+        return self.parenthesize(expr.operator.lexeme, expr.left, expr.right)
+
     # -------------------------
     # Statement visitors
     # -------------------------
@@ -100,6 +103,23 @@ class AstPrinter(EVisitor[str], SVisitor[str]):
             return f"(var {stmt.name.lexeme})"
 
         return f"(var {stmt.name.lexeme} {stmt.initializer.accept(self)})"
+
+    def visit_block_stmt(self, stmt: Stmt.Block) -> str:
+        body = "\n".join(statement.accept(self) for statement in stmt.statements)
+        return f"(block\n{body}\n)"
+
+    def visit_if_stmt(self, stmt: Stmt.If) -> str:
+        if stmt.else_branch is None:
+            return f"(if {stmt.condition.accept(self)} {stmt.then_branch.accept(self)})"
+
+        return (
+            f"(if {stmt.condition.accept(self)} "
+            f"{stmt.then_branch.accept(self)} "
+            f"{stmt.else_branch.accept(self)})"
+        )
+
+    def visit_while_stmt(self, stmt: Stmt.While) -> str:
+        return f"(while {stmt.condition.accept(self)} {stmt.body.accept(self)})"
 
 
 if __name__ == "__main__":
@@ -205,7 +225,53 @@ if __name__ == "__main__":
     print("multiple statements test:", result == expected)
 
     # -------------------------
-    # Test 7: print statement
+    # Test 7: print nil
     # -------------------------
-    statements = [Stmt.Print(None)]
+    statements = [Stmt.Print(Expr.Literal(None))]
+
     result = AstPrinter(statements).print()
+    expected = "(print nil)"
+
+    print(result)
+    print("print nil test:", result == expected)
+
+    # -------------------------
+    # Test 8: while statement
+    # -------------------------
+    a_token = Token(TokenType.IDENTIFIER, "a", None, 1)
+
+    while_stmt = Stmt.While(
+        Expr.Binary(
+            Expr.Variable(a_token),
+            Token(TokenType.LESS, "<", None, 1),
+            Expr.Literal(10),
+        ),
+        Stmt.Block(
+            [
+                Stmt.Print(Expr.Variable(a_token)),
+                Stmt.Expression(
+                    Expr.Assign(
+                        a_token,
+                        Expr.Binary(
+                            Expr.Variable(a_token),
+                            Token(TokenType.PLUS, "+", None, 1),
+                            Expr.Literal(1),
+                        ),
+                    )
+                ),
+            ]
+        ),
+    )
+
+    result = AstPrinter([while_stmt]).print()
+    expected = "\n".join(
+        [
+            "(while (< a 10) (block",
+            "(print a)",
+            "(; (= a (+ a 1)))",
+            "))",
+        ]
+    )
+
+    print(result)
+    print("while statement test:", result == expected)
