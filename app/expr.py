@@ -101,6 +101,16 @@ class Assign(Expr):
         return visitor.visit_assign_expr(self)
 
 
+@dataclass(frozen=True)
+class Call(Expr):
+    callee: Expr
+    paren: Token
+    arguments: List[Expr]
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_call_expr(self)
+
+
 
 Expr.Comma = Comma
 Expr.Logical = Logical
@@ -111,6 +121,7 @@ Expr.Literal = Literal
 Expr.Unary = Unary
 Expr.Variable = Variable
 Expr.Assign = Assign
+Expr.Call = Call
 
 R = TypeVar("R")
 
@@ -125,4 +136,5 @@ class Visitor(Protocol[R]):
     def visit_unary_expr(self, expr: Unary) -> R: ...
     def visit_variable_expr(self, expr: Variable) -> R: ...
     def visit_assign_expr(self, expr: Assign) -> R: ...
+    def visit_call_expr(self, expr: Call) -> R: ...
 

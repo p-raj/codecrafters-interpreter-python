@@ -39,3 +39,16 @@ class ParserException(Exception):
 class InterpreterException(Exception):
     def __init__(self, token: Token, message: str):
         super().__init__(Error(msg=message, line=token.line))
+
+
+class ExecutionException(Exception):
+    pass
+
+
+class BreakExecutionException(ExecutionException):
+    pass
+
+
+class ReturnExecutionException(ExecutionException):
+    def __init__(self, value: object):
+        self.value = value

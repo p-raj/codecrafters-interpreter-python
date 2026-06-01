@@ -1,16 +1,29 @@
-from typing import override
+from __future__ import annotations
+from typing import override, TYPE_CHECKING
 from app.expr import Visitor as EVisitor, Expr
 from app.stmt import Visitor as SVisitor, Stmt
 from app.token import TokenType, Token
-from app.exception import InterpreterException
+from app.exception import (
+    InterpreterException,
+    BreakExecutionException,
+    ReturnExecutionException,
+)
 from app.environment import Environment
 from typing import Callable
+
+if TYPE_CHECKING:
+    from app.lox_callable import LoxCallable
 
 
 class Interpreter(EVisitor[str], SVisitor[None]):
     def __init__(self, error_callback: Callable):
+        from app.lox_callable import ClockLoxCallable
+
         self.propagate_err = error_callback
-        self.environment = Environment()
+        self.globals = Environment()
+        self.environment = self.globals
+
+        self.globals.define("clock", ClockLoxCallable())
 
     ##############################
     # main
@@ -193,12 +206,43 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         self.environment.assign(expr.name, value)
         return value
 
+    def visit_call_expr(self, expr: Expr.Call) -> object:
+        from app.lox_callable import LoxCallable
+
+        callee: object = self.evaluate(expr.callee)
+
+        arguments: list[object] = []
+        for argument in expr.arguments:
+            arguments.append(self.evaluate(argument))
+
+        if not isinstance(callee, LoxCallable):
+            raise InterpreterException(
+                expr.paren,
+                "Can only call functions and classes.",
+            )
+
+        fn = callee
+        if len(arguments) != fn.arity():
+            raise InterpreterException(
+                expr.paren,
+                f"Expected {fn.arity()} arguments but got {len(arguments)}.",
+            )
+
+        return fn.call(self, arguments)
+
     ##############################
     # visitor overrides | Statement
     ##############################
     @override
     def visit_expression_stmt(self, stmt: Stmt.Expression) -> None:
         self.evaluate(stmt.expression)
+
+    @override
+    def visit_function_stmt(self, stmt: Stmt.Function) -> None:
+        from app.lox_function import LoxFunction
+
+        func: LoxFunction = LoxFunction(stmt, self.environment)
+        self.environment.define(stmt.name.lexeme, func)
 
     @override
     def visit_print_stmt(self, stmt: Stmt.Print) -> None:
@@ -225,4 +269,18 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     @override
     def visit_while_stmt(self, stmt: Stmt.While) -> None:
         while self.is_truthy(self.evaluate(stmt.condition)):
-            self.execute(stmt.body)
+            try:
+                self.execute(stmt.body)
+            except BreakExecutionException:
+                break
+
+    @override
+    def visit_break_stmt(self, stmt: Stmt.Break) -> None:
+        raise BreakExecutionException()
+
+    @override
+    def visit_return_stmt(self, stmt: Stmt.Return) -> None:
+        value: object = None
+        if stmt.value:
+            value = self.evaluate(stmt.value)
+        raise ReturnExecutionException(value)

@@ -75,6 +75,32 @@ class While(Stmt):
         return visitor.visit_while_stmt(self)
 
 
+@dataclass(frozen=True)
+class Break(Stmt):
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_break_stmt(self)
+
+
+@dataclass(frozen=True)
+class Function(Stmt):
+    name: Token
+    params: List[Token]
+    body: List[Stmt]
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_function_stmt(self)
+
+
+@dataclass(frozen=True)
+class Return(Stmt):
+    keyword: Token
+    value: Expr
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_return_stmt(self)
+
+
 
 Stmt.Expression = Expression
 Stmt.Print = Print
@@ -82,6 +108,9 @@ Stmt.Var = Var
 Stmt.Block = Block
 Stmt.If = If
 Stmt.While = While
+Stmt.Break = Break
+Stmt.Function = Function
+Stmt.Return = Return
 
 R = TypeVar("R")
 
@@ -93,4 +122,7 @@ class Visitor(Protocol[R]):
     def visit_block_stmt(self, stmt: Block) -> R: ...
     def visit_if_stmt(self, stmt: If) -> R: ...
     def visit_while_stmt(self, stmt: While) -> R: ...
+    def visit_break_stmt(self, stmt: Break) -> R: ...
+    def visit_function_stmt(self, stmt: Function) -> R: ...
+    def visit_return_stmt(self, stmt: Return) -> R: ...
 

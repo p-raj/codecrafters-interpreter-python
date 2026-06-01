@@ -186,6 +186,7 @@ def generate_expr(file_path: Path):
         "Unary": ["Token operator", "Expr right"],
         "Variable": ["Token name"],
         "Assign": ["Token name", "Expr value"],
+        "Call": ["Expr callee", "Token paren", "List[Expr] arguments"],
     }
 
     with open(file_path, "a") as file:
@@ -204,6 +205,9 @@ def generate_stms(file_path: Path):
         "Block": ["List[Stmt] statements"],
         "If": ["Expr condition", "Stmt then_branch", "Stmt else_branch"],
         "While": ["Expr condition", "Stmt body"],
+        "Break": [],
+        "Function": ["Token name", "List[Token] params", "List[Stmt] body"],
+        "Return": ["Token keyword", "Expr value"],
     }
 
     with open(file_path, "a") as file:

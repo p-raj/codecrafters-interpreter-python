@@ -5,14 +5,14 @@ from .exception import ParserException
 from typing import Callable
 
 """
-expression     → assignment ;
-assignment     → IDENTIFIER "=" assignment | equality;
-equality       → comparison ( ( "!=" | "==" ) comparison )* ;
-comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-term           → factor ( ( "-" | "+" ) factor )* ;
-factor         → unary ( ( "/" | "*" ) unary )* ;
-unary          → ( "!" | "-" ) unary | primary ;
-primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
+expression     -> assignment ;
+assignment     -> IDENTIFIER "=" assignment | equality;
+equality       -> comparison ( ( "!=" | "==" ) comparison )* ;
+comparison     -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
+term  -> factor ( ( "-" | "+" ) factor )* ;
+factor-> unary ( ( "/" | "*" ) unary )* ;
+unary -> ( "!" | "-" ) unary | primary ;
+primary        -> NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
 """
 
 
@@ -36,6 +36,7 @@ class Parser:
         self.tokens = tokens
         self.current = 0
         self.propagate_err = error_callback
+        self.loop_depth = 0
 
     def parsee(self):
         try:
@@ -116,7 +117,26 @@ class Parser:
     # statement grammar
     ######################
     def declaration(self) -> Stmt:
+        """
+        declaration ->  funDecl
+                        | varDecl
+                        | statement
+                        ;
+        statement   -> exprStmt
+                       | forStmt
+                       | ifStmt
+                       | printStmt
+                       | returnStmt
+                       | whileStmt
+                       | block ;
+        funDecl       -> "fun" function ;
+        function      -> IDENTIFIER "(" parameters? ")" block ;
+        parameters    -> IDENTIFIER ( "," IDENTIFIER )* ;
+        returnStmt    -> "return" expression? ";" ;
+        """
         try:
+            if self.match(TokenType.FUN):
+                return self.function("function")
             if self.match(TokenType.VAR):
                 return self.var_declaration()
             return self.statement()
@@ -129,10 +149,14 @@ class Parser:
             return self.if_statement()
         if self.match(TokenType.PRINT):
             return self.print_statement()
+        if self.match(TokenType.RETURN):
+            return self.returnStatement()
         if self.match(TokenType.WHILE):
             return self.while_statement()
         if self.match(TokenType.FOR):
             return self.for_statement()
+        if self.match(TokenType.BREAK):
+            return self.break_statement()
         if self.match(TokenType.LEFT_BRACE):
             return Stmt.Block(self.block())
         return self.expression_statement()
@@ -150,13 +174,45 @@ class Parser:
         self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
         return Stmt.Print(value)
 
+    def returnStatement(self) -> Stmt:
+        keyword: Token = self.previous()
+        value: Expr = None
+        if not self.check(TokenType.SEMICOLON):
+            value = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after return value.")
+        return Stmt.Return(keyword, value)
+
     def expression_statement(self) -> Stmt:
         expr: Expr = self.expression()
         self.consume(TokenType.SEMICOLON, "Expect ';' after value.")
         return Stmt.Expression(expr)
 
+    def function(self, kind: str) -> Stmt.Function:
+        name: Token = self.consume(TokenType.IDENTIFIER, "Expect " + kind + " name.")
+
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after " + kind + " name.")
+        parameters: list[Token] = []
+        if not self.check(TokenType.RIGHT_PAREN):
+            while True:
+                parameters.append(
+                    self.consume(TokenType.IDENTIFIER, "Expect parameter name.")
+                )
+                if len(parameters) >= 255:
+                    raise ParserException(
+                        self.peek(), "Can't have more than 255 parameters."
+                    )
+                if not self.match(TokenType.COMMA):
+                    break
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.")
+        self.consume(
+            TokenType.LEFT_BRACE,
+            f"Expect '{{' before {kind} body.",
+        )
+        body = self.block()
+        return Stmt.Function(name, parameters, body)
+
     def if_statement(self) -> Stmt:
-        # ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;
+        # ifStmt-> "if" "(" expression ")" statement ( "else" statement )? ;
         self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'if'.")
         condition: Expr = self.expression()
         self.consume(TokenType.RIGHT_PAREN, "Expect ')' after if condition.")
@@ -170,10 +226,14 @@ class Parser:
         self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'while'.")
         condition: Expr = self.expression()
         self.consume(TokenType.RIGHT_PAREN, "Expect ')' after condition.")
-        body: Stmt = self.statement()
+        self.loop_depth += 1
+        try:
+            body: Stmt = self.statement()
+        finally:
+            self.loop_depth -= 1
         return Stmt.While(condition, body)
 
-    # forStmt → "for" "(" ( varDecl | exprStmt | ";" ) expression? ";" expression? ")" statement ;
+    # forStmt -> "for" "(" ( varDecl | exprStmt | ";" ) expression? ";" expression? ")" statement ;
     def for_statement(self) -> Stmt:
         # desugring concept
         self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.")
@@ -196,7 +256,11 @@ class Parser:
             incr = self.expression()
         self.consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.")
 
-        body: Stmt = self.statement()
+        self.loop_depth += 1
+        try:
+            body: Stmt = self.statement()
+        finally:
+            self.loop_depth -= 1
 
         if incr is not None:
             body = Stmt.Block([body, Stmt.Expression(incr)])
@@ -211,6 +275,12 @@ class Parser:
 
         return body
 
+    def break_statement(self) -> Stmt:
+        if self.loop_depth == 0:
+            raise ParserException(self.previous(), "Expect break in a loop")
+        self.consume(TokenType.SEMICOLON, "Expect ';' after break.")
+        return Stmt.Break()
+
     ######################
     # expression grammar
     ######################
@@ -219,7 +289,7 @@ class Parser:
 
     def comma(self) -> Expr:
         # comma -> (literal <- evaluated and ignored, literal <- used as result)
-        # comma      → assignment ( "," assignment )* ;
+        # comma      -> assignment ( "," assignment )* ;
         expr = self.assignment()
         while self.match(TokenType.COMMA):
             right: Expr = self.assignment()
@@ -228,7 +298,7 @@ class Parser:
         return expr
 
     def assignment(self) -> Expr:
-        # assignment → IDENTIFIER "=" assignment | logic_or;
+        # assignment -> IDENTIFIER "=" assignment | logic_or;
         expr: Expr = self.logic_or()
 
         if self.match(TokenType.EQUAL):
@@ -241,7 +311,7 @@ class Parser:
 
         return expr
 
-    # logic_or       → logic_and ( "or" logic_and )* ;
+    # logic_or       -> logic_and ( "or" logic_and )* ;
     def logic_or(self) -> Expr:
         expr: Expr = self.logic_and()
         while self.match(TokenType.OR):
@@ -250,7 +320,7 @@ class Parser:
             expr = Expr.Logical(expr, operator, right)
         return expr
 
-    # logic_and      → ternary ( "and" ternary )* ;
+    # logic_and      -> ternary ( "and" ternary )* ;
     def logic_and(self) -> Expr:
         expr: Expr = self.ternary()
         while self.match(TokenType.AND):
@@ -271,7 +341,7 @@ class Parser:
         return expr
 
     def equality(self) -> Expr:
-        # equality       → comparison ( ( "!=" | "==" ) comparison )* ;
+        # equality       -> comparison ( ( "!=" | "==" ) comparison )* ;
         expr: Expr = self.comparison()
 
         while self.match(
@@ -284,7 +354,7 @@ class Parser:
         return expr
 
     def comparison(self) -> Expr:
-        # comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
+        # comparison     -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
         expr: Expr = self.term()
 
         while self.match(
@@ -299,7 +369,7 @@ class Parser:
         return expr
 
     def term(self) -> Expr:
-        # term           → factor ( ( "-" | "+" ) factor )* ;
+        # term  -> factor ( ( "-" | "+" ) factor )* ;
         expr: Expr = self.factor()
 
         while self.match(
@@ -312,7 +382,7 @@ class Parser:
         return expr
 
     def factor(self) -> Expr:
-        # factor         → unary ( ( "/" | "*" ) unary )* ;
+        # factor -> unary ( ( "/" | "*" ) unary )* ;
         expr: Expr = self.unary()
 
         while self.match(
@@ -325,7 +395,7 @@ class Parser:
         return expr
 
     def unary(self) -> Expr:
-        # unary          → ( "!" | "-" ) unary | primary ;
+        # unary -> ( "!" | "-" ) unary | call ;
         if self.match(
             TokenType.BANG,
             TokenType.MINUS,
@@ -333,10 +403,42 @@ class Parser:
             operator: Token = self.previous()
             right: Expr = self.unary()
             return Expr.Unary(operator, right)
-        return self.primary()
+        return self.call()
+
+    def call(self) -> Expr:
+        # call -> primary ( "(" arguments? ")" )* ;
+        # arguments      → assignment ( "," assignment )* ;
+        expr: Expr = self.primary()
+
+        while True:
+            if self.match(TokenType.LEFT_PAREN):
+                expr = self.finishCall(expr)
+            else:
+                break
+
+        return expr
+
+    def finishCall(self, callee: Expr) -> Expr:
+        arguments: list[Expr] = []
+        if not self.check(TokenType.RIGHT_PAREN):
+            while True:
+                # arguments      → assignment ( "," assignment )* ;
+                # Note: we have introduced the comma operator
+                # so we cant jump to expression
+                arguments.append(self.assignment())
+                if not self.match(TokenType.COMMA):
+                    break
+                if len(arguments) >= 255:
+                    raise ParserException(
+                        self.peek(), "Can't have more than 255 arguments."
+                    )
+        paren: Token = self.consume(
+            TokenType.RIGHT_PAREN, "Expect ')' after arguments."
+        )
+        return Expr.Call(callee, paren, arguments)
 
     def primary(self) -> Expr:
-        # primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
+        # primary -> NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
         if self.match(TokenType.FALSE):
             return Expr.Literal(False)
         elif self.match(TokenType.TRUE):
