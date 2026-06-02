@@ -1,3 +1,7 @@
+print "------------------loop----------------------";
+for (var baz = 0; baz < 3; baz = baz + 1) {
+  print baz;
+}
 print "---------simple--------";
 var a = "outer";
 {
@@ -17,4 +21,20 @@ var a = "global";
   showA();
   var a = "block";
   showA();
+}
+print "---------closures--------";
+
+{
+  var threshold = 50;
+  fun isEven(n) {
+    if (n == 0) return true;
+    if (n > threshold) return false;
+    return isOdd(n - 1);
+  }
+  fun isOdd(n) {
+    if (n == 0) return false;
+    if (n > threshold) return false;
+    return isEven(n - 1);
+  }
+  print isEven(75);
 }

@@ -95,8 +95,8 @@ class Resolver(EVisitor[str], SVisitor[None]):
         self.current_function = ftype
         self.begin_scope()
         for param in func.params:
-            self.define(param)
             self.declare(param)
+            self.define(param)
         self.resolvess(func.body)
         self.end_scope()
         self.current_function = enclosing_function
@@ -116,7 +116,9 @@ class Resolver(EVisitor[str], SVisitor[None]):
             and self.scopes.peek().get(expr.name.lexeme) is False
         ):
             self.propagate_err(
-                Error("Can't read local variable in its own initializer.", expr.name)
+                Error(
+                    "Can't read local variable in its own initializer.", expr.name.line
+                )
             )
         self.resolve_local(expr, expr.name)
 

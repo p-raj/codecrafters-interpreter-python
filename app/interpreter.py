@@ -63,7 +63,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         stmt.accept(self)
 
     def resolve(self, expr: Expr, depth: int) -> None:
-        self.locals[expr] = depth
+        self.locals[id(expr)] = depth
 
     def execute_block(self, stmts: list[Stmt], env: Environment) -> None:
         prev: Environment = self.environment
@@ -95,7 +95,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         return left == right
 
     def lookup_variable(self, name: Token, expr: Expr) -> object:
-        dist = self.locals.get(expr)
+        dist = self.locals.get(id(expr))
         if dist is None:
             return self.globals.get(name)
         return self.environment.get_at(dist, name.lexeme)
@@ -213,7 +213,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     @override
     def visit_assign_expr(self, expr: Expr.Assign) -> object:
         value: object = self.evaluate(expr.value)
-        dist = self.locals.get(expr)
+        dist = self.locals.get(id(expr))
         if dist is None:
             self.globals.assign(expr.name, value)
         else:
