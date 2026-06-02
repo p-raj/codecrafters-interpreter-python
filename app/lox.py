@@ -2,6 +2,7 @@ import sys
 from .scanner import Scanner
 from .exception import Error
 from .parser import Parser
+from .resolver import Resolver
 from .expr import Expr
 from .stmt import Stmt
 from .utils.ast_printer import AstPrinter
@@ -59,7 +60,11 @@ class Lox:
             if self.has_err:
                 return
 
-            intepreter: Interpreter = Interpreter(self.intepreter_error)
+            intepreter = Interpreter(self.intepreter_error)
+            resolver = Resolver(intepreter, self.error)
+            resolver.resolvess(statements)
+            if self.has_err:
+                return
             intepreter.interprets(statements)
 
     def _report(self, error: Error):

@@ -1,6 +1,7 @@
 from typing import override, TYPE_CHECKING
 from app.lox_callable import LoxCallable
 from app.stmt import Stmt
+from app.expr import Expr
 from app.environment import Environment
 from app.exception import ReturnExecutionException
 
@@ -9,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class LoxFunction(LoxCallable):
-    def __init__(self, declaration: Stmt.Function, closure: Environment):
+    def __init__(self, declaration: Stmt.Function | Expr.Lambda, closure: Environment):
         self.declaration = declaration
         self.closure = closure
 
@@ -29,4 +30,7 @@ class LoxFunction(LoxCallable):
 
     @override
     def __str__(self):
-        return f"<fn {self.declaration.name.lexeme}>"
+        if hasattr(self.declaration, "name"):
+            return f"<fn {self.declaration.name.lexeme}>"
+
+        return "<fn lambda>"

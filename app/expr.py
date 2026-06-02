@@ -1,18 +1,12 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from .token import Token
-from typing import Protocol, TypeVar, List
+from typing import Protocol, TypeVar, List, TYPE_CHECKING
 
 
-"""
-expression     → literal | unary | binary | grouping ;
-literal        → NUMBER | STRING | "true" | "false" | "nil" ;
-grouping       → "(" expression ")" ;
-unary          → ( "-" | "!" ) expression ;
-binary         → expression operator expression ;
-operator       → "==" | "!=" | "<" | "<=" | ">" | ">=" | "+"  | "-"  | "*" | "/"
-
-"""
+if TYPE_CHECKING:
+    from app.stmt import Stmt
 
 
 class Expr(ABC):
@@ -111,6 +105,15 @@ class Call(Expr):
         return visitor.visit_call_expr(self)
 
 
+@dataclass(frozen=True)
+class Lambda(Expr):
+    params: List[Token]
+    body: List[Stmt]
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_lambda_expr(self)
+
+
 
 Expr.Comma = Comma
 Expr.Logical = Logical
@@ -122,6 +125,7 @@ Expr.Unary = Unary
 Expr.Variable = Variable
 Expr.Assign = Assign
 Expr.Call = Call
+Expr.Lambda = Lambda
 
 R = TypeVar("R")
 
@@ -137,4 +141,5 @@ class Visitor(Protocol[R]):
     def visit_variable_expr(self, expr: Variable) -> R: ...
     def visit_assign_expr(self, expr: Assign) -> R: ...
     def visit_call_expr(self, expr: Call) -> R: ...
+    def visit_lambda_expr(self, expr: Lambda) -> R: ...
 

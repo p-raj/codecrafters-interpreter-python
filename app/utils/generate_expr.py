@@ -77,67 +77,19 @@ def _write_base_class(file, base_class: BaseClass):
 def _write_imports(file):
     file.writelines(
         [
+            "from __future__ import annotations",
+            BR,
             "from abc import ABC, abstractmethod",
             BR,
             "from dataclasses import dataclass",
             BR,
             "from .token import Token",
             BR,
-            "from typing import Protocol, TypeVar, List",
+            "from typing import Protocol, TypeVar, List, TYPE_CHECKING",
             BR,
         ]
     )
     _breakline(file, 2)
-
-
-def _write_expr_docstring(file):
-    file.write('"""')
-    _breakline(file)
-    file.writelines(
-        [
-            "expression     → literal | unary | binary | grouping ;",
-            BR,
-            'literal        → NUMBER | STRING | "true" | "false" | "nil" ;',
-            BR,
-            'grouping       → "(" expression ")" ;',
-            BR,
-            'unary          → ( "-" | "!" ) expression ;',
-            BR,
-            "binary         → expression operator expression ;",
-            BR,
-            'operator       → "==" | "!=" | "<" | "<=" | ">" | ">=" | "+"  | "-"  | "*" | "/"',
-            BR,
-        ]
-    )
-    _breakline(file)
-    file.write('"""')
-    _breakline(file, 3)
-
-
-def _write_stmt_docstring(file):
-    file.write('"""')
-    _breakline(file)
-    file.writelines(
-        [
-            "program        → declaration* EOF ;",
-            BR,
-            "declaration    → varDecl | statement ;",
-            BR,
-            'varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;',
-            BR,
-            "statement      → exprStmt | ifStmt | printStmt | block;",
-            BR,
-            'ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;',
-            BR,
-            "exprStmt       → expression <;> ;",
-            BR,
-            "printStmt      → print expression <;> ;",
-            BR,
-        ]
-    )
-    _breakline(file)
-    file.write('"""')
-    _breakline(file, 3)
 
 
 def _write_expr_subclass(file, base_class: BaseClass, map_):
@@ -187,10 +139,19 @@ def generate_expr(file_path: Path):
         "Variable": ["Token name"],
         "Assign": ["Token name", "Expr value"],
         "Call": ["Expr callee", "Token paren", "List[Expr] arguments"],
+        "Lambda": ["List[Token] params", "List[Stmt] body"],
     }
 
     with open(file_path, "a") as file:
-        _write_expr_docstring(file)
+        file.writelines(
+            [
+                "if TYPE_CHECKING:",
+                BR,
+                STAB,
+                "from app.stmt import Stmt",
+            ]
+        )
+        _breakline(file, 3)
         _write_base_class(file, BaseClass.EXPR)
         _write_expr_subclass(file, BaseClass.EXPR, map_)
         _write_expr_subclass_property(file, BaseClass.EXPR, map_)
@@ -211,9 +172,15 @@ def generate_stms(file_path: Path):
     }
 
     with open(file_path, "a") as file:
-        file.write("from .expr import Expr")
-        _breakline(file, 2)
-        _write_stmt_docstring(file)
+        file.writelines(
+            [
+                "if TYPE_CHECKING:",
+                BR,
+                STAB,
+                "from .expr import Expr",
+            ]
+        )
+        _breakline(file, 3)
         _write_base_class(file, BaseClass.STMT)
         _write_expr_subclass(file, BaseClass.STMT, map_)
         _write_expr_subclass_property(file, BaseClass.STMT, map_)

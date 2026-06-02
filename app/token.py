@@ -59,6 +59,17 @@ class Token:
     literal: any
     line: int
 
+    def __hash__(self):
+        return hash(f"{self.kind.value}-{self.lexeme}-{self.literal}-{self.line}")
+
+    def __eq__(self, other: Token):
+        return (
+            self.kind == other.kind
+            and self.lexeme == other.lexeme
+            and self.literal == other.literal
+            and self.line == other.line
+        )
+
     def __str__(self):
         if self.literal is not None:
             return f"{self.kind} {self.lexeme} {self.literal}"

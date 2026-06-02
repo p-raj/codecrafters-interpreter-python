@@ -1,3 +1,25 @@
+print "------------------Lambda----------------------";
+fun thrice(fn) {
+  print fn;
+  for (var i = 1; i <= 3; i = i + 1) {
+    fn(i);
+  }
+}
+
+thrice(fun (a) {
+  print a;
+});
+
+print "------------------Scope----------------------";
+fun scope(a) {
+  var a = "local";
+  print a;
+}
+
+var a = 10;
+print a;
+scope(a);
+
 print "------------------Closures----------------------";
 fun makeCounter() {
   var i = 0;
@@ -19,7 +41,7 @@ fun fib(n) {
   return fib(n - 2) + fib(n - 1);
 }
 
-for (var i = 0; i < 20; i = i + 1) {
+for (var i = 0; i < 10; i = i + 1) {
   print fib(i);
 }
 

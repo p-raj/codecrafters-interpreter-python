@@ -57,8 +57,8 @@ class Parser:
     def previous(self) -> Token:
         return self.tokens[self.current - 1]
 
-    def peek(self) -> Token:
-        return self.tokens[self.current]
+    def peek(self, offset: int = 0) -> Token:
+        return self.tokens[self.current + offset]
 
     def is_at_end(self) -> bool:
         return self.peek().kind == TokenType.EOF
@@ -68,10 +68,10 @@ class Parser:
             self.current += 1
         return self.previous()
 
-    def check(self, token_type: TokenType) -> bool:
+    def check(self, token_type: TokenType, offset: int = 0) -> bool:
         if self.is_at_end():
             return False
-        return self.peek().kind == token_type
+        return self.peek(offset).kind == token_type
 
     def match(self, *token_types: TokenType) -> bool:
         for token_type in token_types:
@@ -114,6 +114,40 @@ class Parser:
         return statements
 
     ######################
+    # function helpers
+    ######################
+    def function_body(self, kind: str) -> tuple[list[Token], list[Stmt]]:
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after " + kind + " name.")
+
+        parameters: list[Token] = []
+
+        if not self.check(TokenType.RIGHT_PAREN):
+            while True:
+                if len(parameters) >= 255:
+                    raise ParserException(
+                        self.peek(),
+                        "Can't have more than 255 parameters.",
+                    )
+
+                parameters.append(
+                    self.consume(TokenType.IDENTIFIER, "Expect parameter name.")
+                )
+
+                if not self.match(TokenType.COMMA):
+                    break
+
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.")
+
+        self.consume(
+            TokenType.LEFT_BRACE,
+            f"Expect '{{' before {kind} body.",
+        )
+
+        body = self.block()
+
+        return parameters, body
+
+    ######################
     # statement grammar
     ######################
     def declaration(self) -> Stmt:
@@ -135,7 +169,9 @@ class Parser:
         returnStmt    -> "return" expression? ";" ;
         """
         try:
-            if self.match(TokenType.FUN):
+            # if self.match(TokenType.FUN):
+            if self.check(TokenType.FUN) and self.check(TokenType.IDENTIFIER, +1):
+                self.advance()
                 return self.function("function")
             if self.match(TokenType.VAR):
                 return self.var_declaration()
@@ -188,28 +224,9 @@ class Parser:
         return Stmt.Expression(expr)
 
     def function(self, kind: str) -> Stmt.Function:
-        name: Token = self.consume(TokenType.IDENTIFIER, "Expect " + kind + " name.")
-
-        self.consume(TokenType.LEFT_PAREN, "Expect '(' after " + kind + " name.")
-        parameters: list[Token] = []
-        if not self.check(TokenType.RIGHT_PAREN):
-            while True:
-                parameters.append(
-                    self.consume(TokenType.IDENTIFIER, "Expect parameter name.")
-                )
-                if len(parameters) >= 255:
-                    raise ParserException(
-                        self.peek(), "Can't have more than 255 parameters."
-                    )
-                if not self.match(TokenType.COMMA):
-                    break
-        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.")
-        self.consume(
-            TokenType.LEFT_BRACE,
-            f"Expect '{{' before {kind} body.",
-        )
-        body = self.block()
-        return Stmt.Function(name, parameters, body)
+        name = self.consume(TokenType.IDENTIFIER, "Expect " + kind + " name.")
+        params, body = self.function_body(kind)
+        return Stmt.Function(name, params, body)
 
     def if_statement(self) -> Stmt:
         # ifStmt-> "if" "(" expression ")" statement ( "else" statement )? ;
@@ -437,6 +454,10 @@ class Parser:
         )
         return Expr.Call(callee, paren, arguments)
 
+    def lambda_expression(self) -> Expr:
+        params, body = self.function_body("lambda")
+        return Expr.Lambda(params, body)
+
     def primary(self) -> Expr:
         # primary -> NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
         if self.match(TokenType.FALSE):
@@ -453,6 +474,8 @@ class Parser:
             return Expr.Grouping(expr)
         elif self.match(TokenType.IDENTIFIER):
             return Expr.Variable(self.previous())
+        elif self.match(TokenType.FUN):
+            return self.lambda_expression()
 
         # Error productions for missing left operands.
 

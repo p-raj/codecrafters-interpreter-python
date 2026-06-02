@@ -19,6 +19,9 @@ class Environment:
 
         raise InterpreterException(name, "Undefined variable '" + name.lexeme + "'.")
 
+    def get_at(self, dist: int, name: str):
+        return self.ancestor(dist).values.get(name)
+
     def assign(self, name: Token, value: object) -> None:
         if name.lexeme in self.values:
             self.values[name.lexeme] = value
@@ -29,3 +32,12 @@ class Environment:
             return
 
         raise InterpreterException(name, f"Undefined variable '{name.lexeme}'.")
+
+    def assign_at(self, dist: int, name: Token, value: object) -> None:
+        self.ancestor(dist).values[name.lexeme] = value
+
+    def ancestor(self, dist: int) -> Environment:
+        env = self
+        for i in range(dist):
+            env = env.enclosing
+        return env

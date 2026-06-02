@@ -22,7 +22,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         self.propagate_err = error_callback
         self.globals = Environment()
         self.environment = self.globals
-
+        self.locals = dict()
         self.globals.define("clock", ClockLoxCallable())
 
     ##############################
@@ -62,6 +62,9 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     def execute(self, stmt: Stmt) -> None:
         stmt.accept(self)
 
+    def resolve(self, expr: Expr, depth: int) -> None:
+        self.locals[expr] = depth
+
     def execute_block(self, stmts: list[Stmt], env: Environment) -> None:
         prev: Environment = self.environment
         try:
@@ -90,6 +93,12 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         if left is None:
             return False
         return left == right
+
+    def lookup_variable(self, name: Token, expr: Expr) -> object:
+        dist = self.locals.get(expr)
+        if dist is None:
+            return self.globals.get(name)
+        return self.environment.get_at(dist, name.lexeme)
 
     ##############################
     # validators
@@ -198,12 +207,17 @@ class Interpreter(EVisitor[str], SVisitor[None]):
 
     @override
     def visit_variable_expr(self, expr: Expr.Variable) -> object:
+        return self.lookup_variable(expr.name, expr)
         return self.environment.get(expr.name)
 
     @override
     def visit_assign_expr(self, expr: Expr.Assign) -> object:
         value: object = self.evaluate(expr.value)
-        self.environment.assign(expr.name, value)
+        dist = locals.get(expr)
+        if dist is None:
+            self.globals.assign(expr.name, value)
+        else:
+            self.environment.assign_at(dist, expr.name, value)
         return value
 
     def visit_call_expr(self, expr: Expr.Call) -> object:
@@ -229,6 +243,12 @@ class Interpreter(EVisitor[str], SVisitor[None]):
             )
 
         return fn.call(self, arguments)
+
+    @override
+    def visit_lambda_expr(self, expr: Expr.Lambda) -> object:
+        from app.lox_function import LoxFunction
+
+        return LoxFunction(expr, self.environment)
 
     ##############################
     # visitor overrides | Statement

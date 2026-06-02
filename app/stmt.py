@@ -1,21 +1,12 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from .token import Token
-from typing import Protocol, TypeVar, List
+from typing import Protocol, TypeVar, List, TYPE_CHECKING
 
 
-from .expr import Expr
-
-"""
-program        → declaration* EOF ;
-declaration    → varDecl | statement ;
-varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
-statement      → exprStmt | ifStmt | printStmt | block;
-ifStmt         → "if" "(" expression ")" statement ( "else" statement )? ;
-exprStmt       → expression <;> ;
-printStmt      → print expression <;> ;
-
-"""
+if TYPE_CHECKING:
+    from .expr import Expr
 
 
 class Stmt(ABC):
