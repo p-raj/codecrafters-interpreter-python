@@ -213,7 +213,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     @override
     def visit_assign_expr(self, expr: Expr.Assign) -> object:
         value: object = self.evaluate(expr.value)
-        dist = locals.get(expr)
+        dist = self.locals.get(expr)
         if dist is None:
             self.globals.assign(expr.name, value)
         else:
