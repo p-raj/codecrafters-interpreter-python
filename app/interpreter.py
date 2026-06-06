@@ -339,9 +339,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         for method in stmt.methods:
             from app.lox_function import LoxFunction
 
-            fn = LoxFunction(
-                method, self.environment, method.name.lexeme.equals("init")
-            )
+            fn = LoxFunction(method, self.environment, method.name.lexeme == "init")
             klass_methods[method.name.lexeme] = fn
 
         klass = LoxClass(stmt.name.lexeme, klass_methods)
