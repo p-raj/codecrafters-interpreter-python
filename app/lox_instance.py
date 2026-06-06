@@ -12,7 +12,7 @@ class LoxInstance:
         self.fields: dict[str, object] = dict()
 
     def __repr__(self):
-        return f"<class instance {self.klass.name}>"
+        return f"{self.klass.name} instance"
 
     def get(self, name: Token):
         if name.lexeme in self.fields:
