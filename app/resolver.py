@@ -209,7 +209,9 @@ class Resolver(EVisitor[str], SVisitor[None]):
         if stmt.value:
             if self.current_function != FunctionType.INITIALIZER:
                 self.propagate_err(
-                    Error("Can't return a value from an initializer.", stmt.keyword)
+                    Error(
+                        "Can't return a value from an initializer.", stmt.keyword.line
+                    )
                 )
             else:
                 self.resolvee(stmt.value)
