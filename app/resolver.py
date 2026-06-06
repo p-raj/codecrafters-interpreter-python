@@ -207,14 +207,14 @@ class Resolver(EVisitor[str], SVisitor[None]):
         if self.current_function == FunctionType.NONE:
             self.propagate_err(Error("Can't return from top-level code.", stmt.keyword))
         if stmt.value:
-            if self.current_function != FunctionType.INITIALIZER:
-                self.propagate_err(
-                    Error(
-                        "Can't return a value from an initializer.", stmt.keyword.line
-                    )
-                )
-            else:
-                self.resolvee(stmt.value)
+            # if self.current_function != FunctionType.INITIALIZER:
+            #     self.propagate_err(
+            #         Error(
+            #             "Can't return a value from an initializer.", stmt.keyword.line
+            #         )
+            #     )
+            # else:
+            self.resolvee(stmt.value)
 
     @override
     def visit_while_stmt(self, stmt: Stmt.While):
