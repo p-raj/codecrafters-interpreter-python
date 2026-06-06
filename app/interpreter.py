@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import override, TYPE_CHECKING
+from typing import override
 from app.expr import Visitor as EVisitor, Expr
 from app.stmt import Visitor as SVisitor, Stmt
 from app.token import TokenType, Token
@@ -11,9 +11,6 @@ from app.exception import (
 from app.environment import Environment
 from app.lox_class import LoxClass
 from typing import Callable
-
-if TYPE_CHECKING:
-    from app.lox_callable import LoxCallable
 
 
 class Interpreter(EVisitor[str], SVisitor[None]):
@@ -248,7 +245,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     def visit_lambda_expr(self, expr: Expr.Lambda) -> object:
         from app.lox_function import LoxFunction
 
-        return LoxFunction(expr, self.environment)
+        return LoxFunction(expr, self.environment, False)
 
     @override
     def visit_get_expr(self, expr: Expr.Get) -> object:
@@ -333,12 +330,12 @@ class Interpreter(EVisitor[str], SVisitor[None]):
 
     @override
     def visit_class_stmt(self, stmt: Stmt.Class):
+        from app.lox_function import LoxFunction
+
         self.environment.define(stmt.name.lexeme, None)
 
         klass_methods = dict()
         for method in stmt.methods:
-            from app.lox_function import LoxFunction
-
             fn = LoxFunction(method, self.environment, method.name.lexeme == "init")
             klass_methods[method.name.lexeme] = fn
 

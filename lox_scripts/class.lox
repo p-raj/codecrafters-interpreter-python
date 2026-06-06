@@ -64,5 +64,36 @@ var counter = makeCounter();
 counter(); // "1".
 counter(); // "2".
 
-print "------------------THIS OUTSIDE----------------------";
+// print "------------------THIS OUTSIDE----------------------";
 // this.counter;
+
+print "------------------TEST----------------------";
+class ThingDefault {
+  init() {
+    this.x = "foo";
+    this.y = 42;
+    // constructor should not return the instance
+    return this; // expect compile error
+  }
+}
+var out = ThingDefault();
+print out;
+
+print "------------------TEST----------------------";
+class Confused {
+  method() {
+    fun inner(instance) {
+      // this is a local variable
+      var feeling = "confused";
+      // Unless explicitly set, feeling can't be
+      // accessed using this keyword
+      print this.feeling; // expect runtime error
+    }
+    return inner;
+  }
+}
+
+var instance = Confused();
+var m = instance.method();
+// calling the function returned should work
+m(instance);
