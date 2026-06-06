@@ -34,4 +34,4 @@ class LoxClass(LoxCallable):
 
     @override
     def __str__(self):
-        return f"<class {self.name}>"
+        return self.name
