@@ -5,13 +5,7 @@ from app.stmt import Visitor as SVisitor, Stmt
 from app.interpreter import Interpreter
 from app.token import Token
 from app.exception import Error
-
-from enum import Enum, auto
-
-
-class FunctionType(Enum):
-    NONE = auto()
-    FUNCTION = auto()
+from app.types import FunctionType, ClassType
 
 
 class Stack:
@@ -43,6 +37,7 @@ class Resolver(EVisitor[str], SVisitor[None]):
         self.scopes = Stack()
         self.propagate_err = error_callback
         self.current_function: FunctionType = FunctionType.NONE
+        self.current_class: ClassType = ClassType.NONE
 
     def begin_scope(self):
         _s: dict[str, bool] = {}
@@ -51,11 +46,13 @@ class Resolver(EVisitor[str], SVisitor[None]):
     def end_scope(self):
         self.scopes.pop()
 
-    def _dd(self, name: Token, flag: bool):
+    def _dd(self, name: Token | str, flag: bool):
+        if isinstance(name, Token):
+            name = name.lexeme
         if self.scopes.is_empty():
             return
         scope = self.scopes.peek()
-        scope[name.lexeme] = flag
+        scope[name] = flag
 
     def declare(self, name: Token):
         if self.scopes.is_empty():
@@ -150,6 +147,24 @@ class Resolver(EVisitor[str], SVisitor[None]):
     def visit_unary_expr(self, expr: Expr.Unary):
         self.resolvee(expr.right)
 
+    @override
+    def visit_get_expr(self, expr: Expr.Get):
+        self.resolvee(expr.objekt)
+
+    @override
+    def visit_set_expr(self, expr: Expr.Set):
+        self.resolvee(expr.value)
+        self.resolvee(expr.objekt)
+
+    @override
+    def visit_this_expr(self, expr: Expr.This):
+        if self.current_class == ClassType.NONE:
+            self.propagate_err(
+                Error("Can't use 'this' outside of a class.", expr.keyword)
+            )
+        else:
+            self.resolve_local(expr, expr.keyword)
+
     ##############################
     # visitor overrides | Statement
     ##############################
@@ -192,9 +207,38 @@ class Resolver(EVisitor[str], SVisitor[None]):
         if self.current_function == FunctionType.NONE:
             self.propagate_err(Error("Can't return from top-level code.", stmt.keyword))
         if stmt.value:
-            self.resolvee(stmt.value)
+            if self.current_function != FunctionType.INITIALIZER:
+                self.propagate_err(
+                    Error("Can't return a value from an initializer.", stmt.keyword)
+                )
+            else:
+                self.resolvee(stmt.value)
 
     @override
     def visit_while_stmt(self, stmt: Stmt.While):
         self.resolvee(stmt.condition)
         self.resolvee(stmt.body)
+
+    @override
+    def visit_class_stmt(self, stmt: Stmt.Class):
+        enclosing_class = self.current_class
+        self.current_class = ClassType.CLASS
+        self.declare(stmt.name)
+        self.define(stmt.name)
+        self.begin_scope()
+        self._dd("this", True)
+        for method in stmt.methods:
+            self.resolve_function(method, FunctionType.METHOD)
+        self.end_scope()
+        self.current_class = enclosing_class
+
+
+"""
+Could not solve - 
+Our resolver calculates which environment the variable is found in, but it’s still looked up by name in that map.
+A more efficient environment representation would store local variables in an array and look them up by index.
+
+Extend the resolver to associate a unique index for each local variable declared in a scope. 
+When resolving a variable access, look up both the scope the variable is in and its index and store that.
+In the interpreter, use that to quickly access a variable by its index instead of using a map.
+"""

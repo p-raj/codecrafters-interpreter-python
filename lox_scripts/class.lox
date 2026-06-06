@@ -1,0 +1,68 @@
+print "------------------Class Definition----------------------";
+class DevonshireCream {
+  serveOn() {
+    return "Scones";
+  }
+}
+
+print DevonshireCream; // Prints "DevonshireCream".
+print "------------------Class Instance----------------------";
+class Bagel {}
+var bagel = Bagel();
+print bagel; // Prints "Bagel instance".
+
+print "------------------Class Property----------------------";
+class Wood {}
+var table = Wood();
+table.name = "titan";
+print table.name;
+
+print "------------------Class Method----------------------";
+class Bacon {
+  eat() {
+    print "Crunch crunch crunch!";
+  }
+}
+
+Bacon().eat(); // Prints "Crunch crunch crunch!".
+
+print "------------------THIS----------------------";
+class Cake {
+  taste() {
+    var adjective = "delicious";
+    print "The " + this.flavor + " cake is " + adjective + "!";
+  }
+}
+
+var cake = Cake();
+cake.flavor = "German chocolate";
+cake.taste(); // 
+
+print "------------------INIT----------------------";
+
+class Foo {
+  init() {
+    print this;
+  }
+}
+
+var foo = Foo();
+print foo.init();
+
+print "------------------Closures----------------------";
+fun makeCounter() {
+  var i = 0;
+  fun count() {
+    i = i + 1;
+    print i;
+  }
+
+  return count;
+}
+
+var counter = makeCounter();
+counter(); // "1".
+counter(); // "2".
+
+print "------------------THIS OUTSIDE----------------------";
+// this.counter;

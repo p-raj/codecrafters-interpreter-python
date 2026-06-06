@@ -114,6 +114,33 @@ class Lambda(Expr):
         return visitor.visit_lambda_expr(self)
 
 
+@dataclass(frozen=True)
+class Get(Expr):
+    objekt: Expr
+    name: Token
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_get_expr(self)
+
+
+@dataclass(frozen=True)
+class Set(Expr):
+    objekt: Expr
+    name: Token
+    value: Expr
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_set_expr(self)
+
+
+@dataclass(frozen=True)
+class This(Expr):
+    keyword: Token
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_this_expr(self)
+
+
 
 Expr.Comma = Comma
 Expr.Logical = Logical
@@ -126,6 +153,9 @@ Expr.Variable = Variable
 Expr.Assign = Assign
 Expr.Call = Call
 Expr.Lambda = Lambda
+Expr.Get = Get
+Expr.Set = Set
+Expr.This = This
 
 R = TypeVar("R")
 
@@ -142,4 +172,7 @@ class Visitor(Protocol[R]):
     def visit_assign_expr(self, expr: Assign) -> R: ...
     def visit_call_expr(self, expr: Call) -> R: ...
     def visit_lambda_expr(self, expr: Lambda) -> R: ...
+    def visit_get_expr(self, expr: Get) -> R: ...
+    def visit_set_expr(self, expr: Set) -> R: ...
+    def visit_this_expr(self, expr: This) -> R: ...
 

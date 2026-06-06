@@ -9,6 +9,7 @@ from app.exception import (
     ReturnExecutionException,
 )
 from app.environment import Environment
+from app.lox_class import LoxClass
 from typing import Callable
 
 if TYPE_CHECKING:
@@ -208,7 +209,6 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     @override
     def visit_variable_expr(self, expr: Expr.Variable) -> object:
         return self.lookup_variable(expr.name, expr)
-        return self.environment.get(expr.name)
 
     @override
     def visit_assign_expr(self, expr: Expr.Assign) -> object:
@@ -250,6 +250,32 @@ class Interpreter(EVisitor[str], SVisitor[None]):
 
         return LoxFunction(expr, self.environment)
 
+    @override
+    def visit_get_expr(self, expr: Expr.Get) -> object:
+        from app.lox_instance import LoxInstance
+
+        objekt: object = self.evaluate(expr.objekt)
+        if isinstance(objekt, LoxInstance):
+            return objekt.get(expr.name)
+
+        raise InterpreterException(expr.name, "Only instances have properties.")
+
+    @override
+    def visit_set_expr(self, expr: Expr.Set) -> object:
+        from app.lox_instance import LoxInstance
+
+        objekt: object = self.evaluate(expr.objekt)
+        if not isinstance(objekt, LoxInstance):
+            raise InterpreterException(expr.name, "Only instances have fields.")
+
+        value: object = self.evaluate(expr.value)
+        objekt.set(expr.name, value)
+        return value
+
+    @override
+    def visit_this_expr(self, expr: Expr.This) -> object:
+        return self.lookup_variable(expr.keyword, expr)
+
     ##############################
     # visitor overrides | Statement
     ##############################
@@ -261,7 +287,7 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     def visit_function_stmt(self, stmt: Stmt.Function) -> None:
         from app.lox_function import LoxFunction
 
-        func: LoxFunction = LoxFunction(stmt, self.environment)
+        func: LoxFunction = LoxFunction(stmt, self.environment, False)
         self.environment.define(stmt.name.lexeme, func)
 
     @override
@@ -304,3 +330,19 @@ class Interpreter(EVisitor[str], SVisitor[None]):
         if stmt.value:
             value = self.evaluate(stmt.value)
         raise ReturnExecutionException(value)
+
+    @override
+    def visit_class_stmt(self, stmt: Stmt.Class):
+        self.environment.define(stmt.name.lexeme, None)
+
+        klass_methods = dict()
+        for method in stmt.methods:
+            from app.lox_function import LoxFunction
+
+            fn = LoxFunction(
+                method, self.environment, method.name.lexeme.equals("init")
+            )
+            klass_methods[method.name.lexeme] = fn
+
+        klass = LoxClass(stmt.name.lexeme, klass_methods)
+        self.environment.assign(stmt.name, klass)

@@ -152,7 +152,8 @@ class Parser:
     ######################
     def declaration(self) -> Stmt:
         """
-        declaration ->  funDecl
+        declaration ->  classDecl
+                        | funDecl
                         | varDecl
                         | statement
                         ;
@@ -163,13 +164,19 @@ class Parser:
                        | returnStmt
                        | whileStmt
                        | block ;
+        classDecl     -> "class" IDENTIFIER "{" function* "}" ;
         funDecl       -> "fun" function ;
         function      -> IDENTIFIER "(" parameters? ")" block ;
+        # Note function != funDecl
+        # there is no fun to begin with
+        # this is going to conflict with call expr
         parameters    -> IDENTIFIER ( "," IDENTIFIER )* ;
         returnStmt    -> "return" expression? ";" ;
         """
         try:
-            # if self.match(TokenType.FUN):
+            if self.check(TokenType.CLASS) and self.check(TokenType.IDENTIFIER, +1):
+                self.advance()
+                return self.class_declaration()
             if self.check(TokenType.FUN) and self.check(TokenType.IDENTIFIER, +1):
                 self.advance()
                 return self.function("function")
@@ -196,6 +203,15 @@ class Parser:
         if self.match(TokenType.LEFT_BRACE):
             return Stmt.Block(self.block())
         return self.expression_statement()
+
+    def class_declaration(self) -> Stmt:
+        name: Token = self.consume(TokenType.IDENTIFIER, "Expect class name.")
+        self.consume(TokenType.LEFT_BRACE, "Expect '{' before class body.")
+        methods: list[Stmt.Function] = []
+        while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
+            methods.append(self.function("method"))
+        self.consume(TokenType.RIGHT_BRACE, "Expect '}' after class body.")
+        return Stmt.Class(name, methods)
 
     def var_declaration(self) -> Stmt:
         name: Token = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
@@ -315,7 +331,7 @@ class Parser:
         return expr
 
     def assignment(self) -> Expr:
-        # assignment -> IDENTIFIER "=" assignment | logic_or;
+        # assignment -> ( call "." )? IDENTIFIER "=" assignment | logic_or;
         expr: Expr = self.logic_or()
 
         if self.match(TokenType.EQUAL):
@@ -324,6 +340,9 @@ class Parser:
 
             if isinstance(expr, Expr.Variable):
                 return Expr.Assign(expr.name, val)
+            elif isinstance(expr, Expr.Get):
+                get_: Expr.Get = expr
+                return Expr.Set(get_.objekt, get_.name, val)
             raise ParserException(eq, "Invalid assignment target.")
 
         return expr
@@ -423,13 +442,18 @@ class Parser:
         return self.call()
 
     def call(self) -> Expr:
-        # call -> primary ( "(" arguments? ")" )* ;
+        # call -> primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
         # arguments      → assignment ( "," assignment )* ;
         expr: Expr = self.primary()
 
         while True:
             if self.match(TokenType.LEFT_PAREN):
                 expr = self.finishCall(expr)
+            elif self.match(TokenType.DOT):
+                name: Token = self.consume(
+                    TokenType.IDENTIFIER, "Expect property name after '.'."
+                )
+                expr = Expr.Get(expr, name)
             else:
                 break
 
@@ -476,6 +500,8 @@ class Parser:
             return Expr.Variable(self.previous())
         elif self.match(TokenType.FUN):
             return self.lambda_expression()
+        elif self.match(TokenType.THIS):
+            return Expr.This(self.previous())
 
         # Error productions for missing left operands.
 

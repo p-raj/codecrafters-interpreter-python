@@ -92,6 +92,15 @@ class Return(Stmt):
         return visitor.visit_return_stmt(self)
 
 
+@dataclass(frozen=True)
+class Class(Stmt):
+    name: Token
+    methods: List[Stmt.Function]
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_class_stmt(self)
+
+
 
 Stmt.Expression = Expression
 Stmt.Print = Print
@@ -102,6 +111,7 @@ Stmt.While = While
 Stmt.Break = Break
 Stmt.Function = Function
 Stmt.Return = Return
+Stmt.Class = Class
 
 R = TypeVar("R")
 
@@ -116,4 +126,5 @@ class Visitor(Protocol[R]):
     def visit_break_stmt(self, stmt: Break) -> R: ...
     def visit_function_stmt(self, stmt: Function) -> R: ...
     def visit_return_stmt(self, stmt: Return) -> R: ...
+    def visit_class_stmt(self, stmt: Class) -> R: ...
 

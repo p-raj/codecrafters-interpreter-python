@@ -1,0 +1,8 @@
+print "-----------------------FN------------------------";
+
+fun sayHi(first, last) {
+  print "Hi, " + first + " " + last + "!";
+}
+print sayHi;
+var h = "Hello";
+sayHi(h, "World");
