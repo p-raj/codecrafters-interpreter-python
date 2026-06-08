@@ -95,6 +95,7 @@ class Return(Stmt):
 @dataclass(frozen=True)
 class Class(Stmt):
     name: Token
+    superclass: Expr.Variable
     methods: List[Stmt.Function]
 
     def accept(self, visitor: Visitor[R]) -> R:

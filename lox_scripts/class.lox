@@ -1,3 +1,48 @@
+print "------------------Multiple:SUPER+SUBCLASS----------------------";
+class A {
+  method() {
+    print "A method";
+  }
+}
+
+class B < A {
+  method() {
+    print "B method";
+  }
+
+  test() {
+    super.method();
+  }
+}
+
+class C < B {}
+
+C().test();
+print "------------------SUPER+SUBCLASS----------------------";
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+
+class BostonCream < Doughnut {
+  cook() {
+    super.cook();
+    print "Pipe full of custard and coat with chocolate.";
+  }
+}
+
+BostonCream().cook();
+print "------------------SUBCLASS----------------------";
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+
+class BostonCream < Doughnut {}
+
+BostonCream().cook();
 print "------------------Class Definition----------------------";
 class DevonshireCream {
   serveOn() {
@@ -67,33 +112,34 @@ counter(); // "2".
 // print "------------------THIS OUTSIDE----------------------";
 // this.counter;
 
-print "------------------TEST----------------------";
-class ThingDefault {
-  init() {
-    this.x = "foo";
-    this.y = 42;
-    // constructor should not return the instance
-    return this; // expect compile error
-  }
-}
-var out = ThingDefault();
-print out;
+// print "------------------TEST----------------------";
+// class ThingDefault {
+//   init() {
+//     this.x = "foo";
+//     this.y = 42;
+//     // constructor should not return the instance
+//     return this; // expect compile error
+//   }
+// }
+// var out = ThingDefault();
+// print out;
 
-print "------------------TEST----------------------";
-class Confused {
-  method() {
-    fun inner(instance) {
-      // this is a local variable
-      var feeling = "confused";
-      // Unless explicitly set, feeling can't be
-      // accessed using this keyword
-      print this.feeling; // expect runtime error
-    }
-    return inner;
-  }
-}
+// print "------------------TEST----------------------";
+// class Confused {
+//   method() {
+//     fun inner(instance) {
+//       // this is a local variable
+//       var feeling = "confused";
+//       // Unless explicitly set, feeling can't be
+//       // accessed using this keyword
+//       print this.feeling; // expect runtime error
+//     }
+//     return inner;
+//   }
+// }
 
-var instance = Confused();
-var m = instance.method();
-// calling the function returned should work
-m(instance);
+// var instance = Confused();
+// var m = instance.method();
+// // calling the function returned should work
+// m(instance);
+

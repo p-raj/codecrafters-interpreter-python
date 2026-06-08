@@ -8,9 +8,15 @@ if TYPE_CHECKING:
 
 
 class LoxClass(LoxCallable):
-    def __init__(self, name: str, methods: dict | None = None):
+    def __init__(
+        self,
+        name: str,
+        superclass: LoxClass | None = None,
+        methods: dict | None = None,
+    ):
         self.name = name
         self.methods = methods or dict()
+        self.superclass = superclass
 
     @override
     def arity(self) -> int:
@@ -30,7 +36,10 @@ class LoxClass(LoxCallable):
         return instance
 
     def find_method(self, name: str):
-        return self.methods.get(name)
+        if name in self.methods:
+            return self.methods[name]
+        if self.superclass:
+            return self.superclass.find_method(name)
 
     @override
     def __str__(self):

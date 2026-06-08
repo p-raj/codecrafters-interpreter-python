@@ -142,6 +142,7 @@ def generate_expr(file_path: Path):
         "Lambda": ["List[Token] params", "List[Stmt] body"],
         "Get": ["Expr objekt", "Token name"],
         "Set": ["Expr objekt", "Token name", "Expr value"],
+        "Super": ["Token keyword", "Token method"],
         "This": ["Token keyword"],
     }
 
@@ -172,7 +173,11 @@ def generate_stms(file_path: Path):
         "Break": [],
         "Function": ["Token name", "List[Token] params", "List[Stmt] body"],
         "Return": ["Token keyword", "Expr value"],
-        "Class": ["Token name", "List[Stmt.Function] methods"],
+        "Class": [
+            "Token name",
+            "Expr.Variable superclass",
+            "List[Stmt.Function] methods",
+        ],
     }
 
     with open(file_path, "a") as file:

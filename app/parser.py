@@ -164,7 +164,8 @@ class Parser:
                        | returnStmt
                        | whileStmt
                        | block ;
-        classDecl     -> "class" IDENTIFIER "{" function* "}" ;
+        classDecl     -> "class" IDENTIFIER ( "<" IDENTIFIER )?
+                         "{" function* "}" ;
         funDecl       -> "fun" function ;
         function      -> IDENTIFIER "(" parameters? ")" block ;
         # Note function != funDecl
@@ -206,12 +207,16 @@ class Parser:
 
     def class_declaration(self) -> Stmt:
         name: Token = self.consume(TokenType.IDENTIFIER, "Expect class name.")
+        superclass: Expr.Variable | None = None
+        if self.match(TokenType.LESS):
+            self.consume(TokenType.IDENTIFIER, "Expect superclass name.")
+            superclass = Expr.Variable(self.previous())
         self.consume(TokenType.LEFT_BRACE, "Expect '{' before class body.")
         methods: list[Stmt.Function] = []
         while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
             methods.append(self.function("method"))
         self.consume(TokenType.RIGHT_BRACE, "Expect '}' after class body.")
-        return Stmt.Class(name, methods)
+        return Stmt.Class(name, superclass, methods)
 
     def var_declaration(self) -> Stmt:
         name: Token = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
@@ -483,7 +488,9 @@ class Parser:
         return Expr.Lambda(params, body)
 
     def primary(self) -> Expr:
-        # primary -> NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
+        # primary     ->  "true" | "false" | "nil" | "this"
+        #               | NUMBER | STRING | IDENTIFIER | "(" expression ")"
+        #               | "super" "." IDENTIFIER ;
         if self.match(TokenType.FALSE):
             return Expr.Literal(False)
         elif self.match(TokenType.TRUE):
@@ -502,7 +509,13 @@ class Parser:
             return self.lambda_expression()
         elif self.match(TokenType.THIS):
             return Expr.This(self.previous())
-
+        elif self.match(TokenType.SUPER):
+            keyword = self.previous()
+            self.consume(TokenType.DOT, "Expect '.' after 'super'.")
+            method = self.consume(
+                TokenType.IDENTIFIER, "Expect superclass method name."
+            )
+            return Expr.Super(keyword, method)
         # Error productions for missing left operands.
 
         if self.match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL):

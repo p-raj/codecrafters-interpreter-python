@@ -165,6 +165,19 @@ class Resolver(EVisitor[str], SVisitor[None]):
         else:
             self.resolve_local(expr, expr.keyword)
 
+    @override
+    def visit_super_expr(self, expr: Expr.Super):
+        if self.current_class == ClassType.NONE:
+            self.propagate_err(
+                Error("Can't use 'super' outside of a class.", expr.keyword)
+            )
+        if self.current_class != ClassType.SUBCLASS:
+            self.propagate_err(
+                Error("Can't use 'super' in a class with no superclass.", expr.keyword)
+            )
+        else:
+            self.resolve_local(expr, expr.keyword)
+
     ##############################
     # visitor overrides | Statement
     ##############################
@@ -227,6 +240,16 @@ class Resolver(EVisitor[str], SVisitor[None]):
         self.current_class = ClassType.CLASS
         self.declare(stmt.name)
         self.define(stmt.name)
+        if stmt.superclass:
+            self.current_class = ClassType.SUBCLASS
+            self.resolvee(stmt.superclass)
+        if stmt.superclass and stmt.superclass.name.lexeme == stmt.name.lexeme:
+            self.propagate_err(
+                Error("A class can't inherit from itself.", stmt.superclass.name)
+            )
+        if stmt.superclass:
+            self.begin_scope()
+            self._dd("super", True)
         self.begin_scope()
         self._dd("this", True)
         for method in stmt.methods:
@@ -235,6 +258,8 @@ class Resolver(EVisitor[str], SVisitor[None]):
                 decl = FunctionType.INITIALIZER
             self.resolve_function(method, decl)
         self.end_scope()
+        if stmt.superclass:
+            self.end_scope()
         self.current_class = enclosing_class
 
 

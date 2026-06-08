@@ -134,6 +134,15 @@ class Set(Expr):
 
 
 @dataclass(frozen=True)
+class Super(Expr):
+    keyword: Token
+    method: Token
+
+    def accept(self, visitor: Visitor[R]) -> R:
+        return visitor.visit_super_expr(self)
+
+
+@dataclass(frozen=True)
 class This(Expr):
     keyword: Token
 
@@ -155,6 +164,7 @@ Expr.Call = Call
 Expr.Lambda = Lambda
 Expr.Get = Get
 Expr.Set = Set
+Expr.Super = Super
 Expr.This = This
 
 R = TypeVar("R")
@@ -174,5 +184,6 @@ class Visitor(Protocol[R]):
     def visit_lambda_expr(self, expr: Lambda) -> R: ...
     def visit_get_expr(self, expr: Get) -> R: ...
     def visit_set_expr(self, expr: Set) -> R: ...
+    def visit_super_expr(self, expr: Super) -> R: ...
     def visit_this_expr(self, expr: This) -> R: ...
 

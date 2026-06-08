@@ -273,6 +273,18 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     def visit_this_expr(self, expr: Expr.This) -> object:
         return self.lookup_variable(expr.keyword, expr)
 
+    @override
+    def visit_super_expr(self, expr: Expr.Super) -> object:
+        dist = self.locals.get(id(expr))
+        superclass = self.environment.get_at(dist, "super")
+        objekt = self.environment.get_at(dist - 1, "this")
+        method = superclass.find_method(expr.method.lexeme)
+        if not method:
+            raise InterpreterException(
+                expr.method, "Undefined property '" + expr.method.lexeme + "'."
+            )
+        return method.bind(objekt)
+
     ##############################
     # visitor overrides | Statement
     ##############################
@@ -332,12 +344,26 @@ class Interpreter(EVisitor[str], SVisitor[None]):
     def visit_class_stmt(self, stmt: Stmt.Class):
         from app.lox_function import LoxFunction
 
+        superclass: object = None
+        if stmt.superclass:
+            superclass = self.evaluate(stmt.superclass)
+            if not isinstance(superclass, LoxClass):
+                raise InterpreterException(
+                    stmt.superclass.name, "Superclass must be a class."
+                )
         self.environment.define(stmt.name.lexeme, None)
+
+        if stmt.superclass:
+            self.environment = Environment(self.environment)
+            self.environment.define("super", superclass)
 
         klass_methods = dict()
         for method in stmt.methods:
             fn = LoxFunction(method, self.environment, method.name.lexeme == "init")
             klass_methods[method.name.lexeme] = fn
 
-        klass = LoxClass(stmt.name.lexeme, klass_methods)
+        klass = LoxClass(stmt.name.lexeme, superclass, klass_methods)
+
+        if stmt.superclass:
+            self.environment = self.environment.enclosing
         self.environment.assign(stmt.name, klass)
