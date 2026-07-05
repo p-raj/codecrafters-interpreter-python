@@ -148,9 +148,28 @@ static bool match(TokenType type) {
 // to a series of bytecode instructions. It starts with the easiest possible step: appending a
 // single byte to the chunk.
 static void emitByte(uint8_t byte) { writeChunk(currentChunk(), byte, parser.previous.line); }
+
 static void emitBytes(uint8_t byte1, uint8_t byte2) {
     emitByte(byte1);
     emitByte(byte2);
+}
+
+static void emitLoop(int loopStart) {
+    emitByte(OP_LOOP);
+    int offset = currentChunk()->count - loopStart + 2;
+    if (offset > UINT16_MAX) error("Loop body too large");
+    emitByte((offset >> 8) & 0xff);
+    emitByte(offset & 0xff);
+}
+
+static int emitJump(uint8_t instruction) {
+    // The first emits a bytecode instruction and writes a placeholder operand for the jump offset.
+    emitByte(instruction);
+    // We use two bytes for the jump offset operand. A 16-bit offset lets us jump over up to 65,535
+    // bytes of code, which should be plenty for our needs.
+    emitByte(0XFF);
+    emitByte(0XFF);
+    return currentChunk()->count - 2;
 }
 
 static void emitReturn() { emitByte(OP_RETURN); }
@@ -165,6 +184,15 @@ static uint8_t makeConstant(Value value) {
 }
 
 static void emitConstant(Value value) { emitBytes(OP_CONSTANT, makeConstant(value)); }
+
+static void patchJump(int offset) {
+    int jump = currentChunk()->count - 2;
+    if (jump > UINT16_MAX) {
+        error("Too much code to jump over.");
+    }
+    currentChunk()->code[offset] = (jump >> 8) & 0XFF;
+    currentChunk()->code[offset] = jump & 0XFF;
+}
 
 static void initCompiler(Compiler* compiler) {
     compiler->localCount = 0;
@@ -320,6 +348,13 @@ static void defineVariable(uint8_t global) {
     emitBytes(OP_DEFINE_GLOBAL, global);
 }
 
+static void and_(bool canAssign) {
+    int endJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP);
+    parsePrecedence(PREC_AND);
+    patchJump(endJump);
+}
+
 static void grouping(bool canAssign) {
     expression();
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
@@ -336,6 +371,17 @@ static void number(bool canAssign) {
     // a character string into a double-precision floating-point number
     double value = strtod(parser.previous.start, NULL);
     emitConstant(NUMBER_VAL(value));
+}
+
+static void or_(bool canAssign) {
+    int elseJump = emitJump(OP_JUMP_IF_FALSE);
+    int endJump = emitJump(OP_JUMP);
+
+    patchJump(elseJump);
+    emitByte(OP_POP);
+
+    parsePrecedence(PREC_OR);
+    patchJump(endJump);
 }
 
 // The + 1 and - 2 parts trim the leading and trailing quotation marks.
@@ -498,7 +544,7 @@ ParseRule rules[] = {
   [TOKEN_IDENTIFIER]    = {variable,     NULL,   PREC_NONE},
   [TOKEN_STRING]        = {string,     NULL,   PREC_NONE},
   [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},
-  [TOKEN_AND]           = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_AND]           = {NULL,     and_,   PREC_AND},
   [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},
   [TOKEN_FALSE]         = {literal,     NULL,   PREC_NONE},
@@ -506,7 +552,7 @@ ParseRule rules[] = {
   [TOKEN_FUN]           = {NULL,     NULL,   PREC_NONE},
   [TOKEN_IF]            = {NULL,     NULL,   PREC_NONE},
   [TOKEN_NIL]           = {literal,     NULL,   PREC_NONE},
-  [TOKEN_OR]            = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_OR]            = {NULL,     or_,   PREC_OR},
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
   [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
@@ -578,10 +624,123 @@ static void expressionStatement() {
     emitByte(OP_POP);
 }
 
+static void forStatement() {
+    beginScope();
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+    // consume(TOKEN_SEMICOLON, "Expect ';'."); -> INITIALIZER
+    if (match(TOKEN_SEMICOLON)) {
+        // no initializer
+    } else if (match(TOKEN_VAR)) {
+        varDeclaration();
+    } else {
+        expressionStatement();
+    }
+    // We don’t want the initializer to leave anything on the stack.
+
+    // here is the expression we need to evaluate multiple times
+    int loopStart = currentChunk()->count;
+    int exitJump = -1;
+    // this isnt an infinite loop
+    // like (for int i; <condition empty> ; i+=1)
+    // consume(TOKEN_SEMICOLON, "Expect ';'."); -> CONDITION
+    if (!match(TOKEN_SEMICOLON)) {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after loop condition.");
+        // Jump out of the loop if the condition is false.
+        exitJump = emitJump(OP_JUMP_IF_FALSE);
+        emitByte(OP_POP);  // Condition.
+    }
+
+    // the increment clause. It’s pretty convoluted. It appears
+    // textually before the body, but executes after it. If we parsed to an AST and generated code
+    // in a separate pass, we could simply traverse into and compile the for statement AST’s body
+    // field before its increment clause.
+    // , since our compiler only makes a single pass over the code. Instead, we’ll jump over the
+    // increment, run the body, jump back up to the increment, run it, and then go to the next
+    // iteration.
+    if (!match(TOKEN_RIGHT_PAREN)) {
+        int bodyJump = emitJump(OP_JUMP);
+        int incrementStart = currentChunk()->count;
+        expression();
+        emitByte(OP_POP);
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+        emitLoop(loopStart);
+        loopStart = incrementStart;
+        patchJump(bodyJump);
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+
+    statement();
+    emitLoop(loopStart);
+    if (exitJump != -1) {
+        patchJump(exitJump);
+        emitByte(OP_POP);
+    }
+    endScope();
+}
+
+static void ifStatement() {
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'if'.");
+
+    int thenJump = emitJump(OP_JUMP_IF_FALSE);
+    // The setup on the stack
+    // 1> Evaluation: When the if statement begins, the compiler runs expression(). At runtime, this
+    // evaluates your condition (e.g., x > 5) and pushes either [true or false] onto the top of the
+    // stack.
+    // 2> The jump check: Next, OP_JUMP_IF_FALSE looks at that top value to decide whether it needs
+    // to skip the code block. As noted in the text, OP_JUMP_IF_FALSE intentionally does not pop the
+    // value because the VM wants to reuse that exact same instruction later for short-circuiting
+    // logical operators (like and and or).
+    // 3> The leftover value: Because the jump instruction left it behind, the condition value is
+    // still sitting on top of the stack when the VM enters the then branch.
+
+    // to clear up the TRUE value on the stack
+    emitByte(OP_POP);
+    statement();
+
+    // we have to have the else jumps as well because if the <if> branch is taken
+    // we once that branch is done, we have to skip over <else> branch and continue
+    // from a new location
+    int elseJump = emitJump(OP_JUMP);
+
+    patchJump(thenJump);
+    // to clear up the FALSE value on the stack
+    // lands here on OP_JUMP_IF_FALSE
+    emitByte(OP_POP);
+
+    // Adding support for else branch
+    if (match(TOKEN_ELSE)) {
+        statement();
+    }
+    // After executing the then branch, this jumps to the next statement after the else branch.
+    // Unlike the other jump, this jump is unconditional.
+    patchJump(elseJump);
+}
+
 static void printStatement() {
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after value.");
     emitByte(OP_PRINT);
+}
+
+static void whileStatement() {
+    int loopStart = currentChunk()->count;
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+
+    int exitJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP);
+    statement();
+    // once statement is done
+    // we might want to loop back
+    emitLoop(loopStart);
+
+    patchJump(exitJump);
+    emitByte(OP_POP);
 }
 
 // If we hit a compile error while parsing the previous statement, we enter panic mode. When that
@@ -639,6 +798,12 @@ static void block() {
 static void statement() {
     if (match(TOKEN_PRINT)) {
         printStatement();
+    } else if (match(TOKEN_FOR)) {
+        forStatement();
+    } else if (match(TOKEN_IF)) {
+        ifStatement();
+    } else if (match(TOKEN_WHILE)) {
+        whileStatement();
     }
     // Blocks are a kind of statement, so the rule for them goes in the statement production.
     else if (match(TOKEN_LEFT_BRACE)) {

@@ -42,6 +42,8 @@ static InterpretResult run() {
 // and looks up the corresponding Value in the chunk’s constant table.
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 
+#define READ_SHORT() (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
+
 // It reads a one-byte operand from the bytecode chunk. It treats that as an index into the chunk’s
 // constant table and returns the string at that index. It doesn’t check that the value is a
 // string—it just indiscriminately casts it. That’s safe because the compiler never emits an
@@ -205,8 +207,31 @@ static InterpretResult run() {
                 // Every bytecode instruction has a stack effect that describes how the instruction
                 // modifies the stack.
                 // The bytecode for an entire statement has a total stack effect of zero.
+                // [NOTE], each statement is required to have zero stack effect—after the
+                // statement is finished executing, the stack should be as tall as it was before.
                 printValue(pop());
                 printf("\n");
+                break;
+            }
+            case OP_JUMP: {
+                uint16_t offset = READ_SHORT();
+                vm.ip += offset;
+                break;
+            }
+            case OP_JUMP_IF_FALSE: {
+                uint16_t offset = READ_SHORT();
+                // we have to do some more work here to ensure that stack gets cleaned up
+                // if we are jumping to a different offset
+                // the stack that was supposed to get used if the code would have chosen the
+                // <if branch> is still there
+                if (isFalsy(peek(0))) {
+                    vm.ip += offset;
+                }
+                break;
+            }
+            case OP_LOOP: {
+                uint16_t offset = READ_SHORT();
+                vm.ip -= offset;
                 break;
             }
             case OP_RETURN: {
@@ -217,6 +242,7 @@ static InterpretResult run() {
 
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef READ_SHORT
 #undef READ_STRING
 #undef BINARY_OP
 }

@@ -52,6 +52,9 @@ typedef enum {
     // var a = 1.2; print -a => -1.2
     OP_NEGATE,
     OP_PRINT,
+    OP_JUMP,
+    OP_JUMP_IF_FALSE,
+    OP_LOOP,
     // pops off the last stack value and returns
     OP_RETURN,
 } OpCode;
