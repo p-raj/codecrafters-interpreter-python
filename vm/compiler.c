@@ -212,12 +212,12 @@ static uint8_t makeConstant(Value value) {
 static void emitConstant(Value value) { emitBytes(OP_CONSTANT, makeConstant(value)); }
 
 static void patchJump(int offset) {
-    int jump = currentChunk()->count - 2;
+    int jump = currentChunk()->count - offset - 2;
     if (jump > UINT16_MAX) {
         error("Too much code to jump over.");
     }
     currentChunk()->code[offset] = (jump >> 8) & 0XFF;
-    currentChunk()->code[offset] = jump & 0XFF;
+    currentChunk()->code[offset + 1] = jump & 0XFF;
 }
 
 static void initCompiler(Compiler* compiler, FunctionType type) {
@@ -406,11 +406,11 @@ static void defineVariable(uint8_t global) {
 static uint8_t argumentList() {
     uint8_t argCount = 0;
     if (!check(TOKEN_RIGHT_PAREN)) {
-        if (argCount == 255) {
-            error("Can't have more than 255 arguments.");
-        }
         do {
             expression();
+            if (argCount == 255) {
+                error("Can't have more than 255 arguments.");
+            }
             argCount++;
         } while (match(TOKEN_COMMA));
     }
