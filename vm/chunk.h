@@ -55,6 +55,8 @@ typedef enum {
     OP_JUMP,
     OP_JUMP_IF_FALSE,
     OP_LOOP,
+    // function call
+    OP_CALL,
     // pops off the last stack value and returns
     OP_RETURN,
 } OpCode;

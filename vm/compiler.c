@@ -63,7 +63,24 @@ typedef struct {
     int depth;
 } Local;
 
-typedef struct {
+typedef enum { TYPE_FUNCTION, TYPE_SCRIPT } FunctionType;
+
+typedef struct Compiler {
+    // Functions nest by default
+    // any function declared would nest under the global "main" function
+    // functions behave like stack
+    // Each Compiler points back to the Compiler for the function that encloses it, all the way
+    // back to the root Compiler for the top-level code.
+    struct Compiler* enclosing;
+
+    // HACK: kind of like a main() function
+    // there is an implicit top-level function.
+    // . It’s as if the entire program is wrapped inside an implicit main() function.
+    // Every place in the compiler that was writing to the Chunk now needs to go through that
+    // function pointer --> Change how the currentChunk() works and is used
+    ObjFunction* function;
+    FunctionType type;
+
     // flat array of all locals that are in scope during each point in the compilation process.
     // ordered in the array in the order that their declarations appear in the code.
     // 1. Since the instruction operand we’ll use to encode a local is a single byte
@@ -91,7 +108,10 @@ Parser parser;
 Compiler* current = NULL;
 Chunk* compilingChunk;
 
-static Chunk* currentChunk() { return compilingChunk; }
+static Chunk* currentChunk() {
+    return &current->function->chunk;
+    // return compilingChunk;
+}
 
 static void errorAt(Token* token, const char* message) {
     // keep compiling, but stop complaining
@@ -172,7 +192,13 @@ static int emitJump(uint8_t instruction) {
     return currentChunk()->count - 2;
 }
 
-static void emitReturn() { emitByte(OP_RETURN); }
+static void emitReturn() {
+    // Note that we assume here that the function did actually return a value
+    // but thats not always the case
+    // so the implicit return is NIL VALUE
+    emitByte(OP_NIL);
+    emitByte(OP_RETURN);
+}
 
 static uint8_t makeConstant(Value value) {
     int constant = addConstant(currentChunk(), value);
@@ -194,19 +220,42 @@ static void patchJump(int offset) {
     currentChunk()->code[offset] = jump & 0XFF;
 }
 
-static void initCompiler(Compiler* compiler) {
+static void initCompiler(Compiler* compiler, FunctionType type) {
+    compiler->enclosing = current;
+    compiler->function = NULL;
+    compiler->type = type;
     compiler->localCount = 0;
     compiler->scopeDepth = 0;
+    compiler->function = newFunction();
     current = compiler;
+
+    if (type != TYPE_SCRIPT) {
+        current->function->name = copyString(parser.previous.start, parser.previous.length);
+    }
+
+    // Remember that the compiler’s locals array keeps track of which stack slots are associated
+    // with which local variables or temporaries. From now on, the compiler implicitly claims stack
+    // slot zero for the VM’s own internal use. We give it an empty name so that the user can’t
+    // write an identifier that refers to it.
+    Local* local = &current->locals[current->localCount++];
+    local->depth = 0;
+    local->name.start = "";
+    local->name.length = 0;
 }
 
-static void endCompiler() {
+static ObjFunction* endCompiler() {
     emitReturn();
+    ObjFunction* function = current->function;
+
 #ifdef DEBUG_PRINT_CODE
     if (!parser.hadError) {
-        disassembleChunk(currentChunk(), "code");
+        disassembleChunk(currentChunk(),
+                         function->name != NULL ? function->name->chars : "<script>");
     }
 #endif
+    // pop back to the enclosing compiler
+    current = current->enclosing;
+    return function;
 }
 
 static void beginScope() { current->scopeDepth++; }
@@ -225,6 +274,8 @@ static void expression();
 static void block();
 static void statement();
 static void declaration();
+static void funDeclaration();
+static void varDeclaration();
 static ParseRule* getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
@@ -328,6 +379,10 @@ static uint8_t parseVariable(const char* errorMessage) {
 }
 
 static void markInitialized() {
+    // Before, we called markInitialized() only when we already knew we were in a local scope. Now,
+    // a top-level function declaration will also call this function. When that happens, there is no
+    // local variable to mark initialized—the function is bound to a global variable.
+    if (current->scopeDepth == 0) return;
     current->locals[current->localCount - 1].depth = current->scopeDepth;
 }
 
@@ -346,6 +401,21 @@ static void defineVariable(uint8_t global) {
         return;
     }
     emitBytes(OP_DEFINE_GLOBAL, global);
+}
+
+static uint8_t argumentList() {
+    uint8_t argCount = 0;
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        if (argCount == 255) {
+            error("Can't have more than 255 arguments.");
+        }
+        do {
+            expression();
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+    return argCount;
 }
 
 static void and_(bool canAssign) {
@@ -504,6 +574,11 @@ static void binary(bool canAssign) {
     }
 }
 
+static void call(bool canAssign) {
+    uint8_t argCount = argumentList();
+    emitBytes(OP_CALL, argCount);
+}
+
 static void literal(bool canAssign) {
     switch (parser.previous.type) {
         case TOKEN_FALSE:
@@ -522,7 +597,7 @@ static void literal(bool canAssign) {
 
 // clang-format off
 ParseRule rules[] = {
-  [TOKEN_LEFT_PAREN]    = {grouping, NULL,   PREC_NONE},
+  [TOKEN_LEFT_PAREN]    = {grouping, call,   PREC_CALL},
   [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,   PREC_NONE},
   [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
@@ -726,6 +801,26 @@ static void printStatement() {
     emitByte(OP_PRINT);
 }
 
+static void returnStatement() {
+    if (current->type == TYPE_SCRIPT) {
+        // This is one of the reasons we added that FunctionType enum to the compiler.
+        error("Can't return from top-level code.");
+    }
+    if (match(TOKEN_SEMICOLON)) {
+        // this sets up the NIL value on the stack
+        emitReturn();
+    } else {
+        // The return value expression is optional, so the parser looks for a semicolon token to
+        // tell if a value was provided. If there is no return value, the statement implicitly
+        // returns nil. We implement that by calling emitReturn(), which emits an OP_NIL
+        // instruction. Otherwise, we compile the return value expression and return it with an
+        // OP_RETURN instruction.
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
+        emitByte(OP_RETURN);
+    }
+}
+
 static void whileStatement() {
     int loopStart = currentChunk()->count;
     consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
@@ -780,7 +875,9 @@ static void synchronize() {
 //                  | statement
 
 static void declaration() {
-    if (match(TOKEN_VAR)) {
+    if (match(TOKEN_FUN)) {
+        funDeclaration();
+    } else if (match(TOKEN_VAR)) {
         varDeclaration();
     } else {
         statement();
@@ -795,6 +892,50 @@ static void block() {
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after block");
 }
 
+static void function(FunctionType type) {
+    Compiler compiler;
+    // [TRICK] sets the "current compiler" to this function
+    // Then, as we compile the body, all of the functions that emit bytecode write to the chunk
+    // owned by the new Compiler’s function.
+    initCompiler(&compiler, type);
+    beginScope();
+
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+    // paramters
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            current->function->arity++;
+            if (current->function->arity > 255) {
+                errorAtCurrent("Can't have more than 255 parameters.");
+            }
+            uint8_t constant = parseVariable("Expect parameter name.");
+            defineVariable(constant);
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+    block();
+
+    // compiler yields the newly compiled function object,
+    ObjFunction* function = endCompiler();
+    // which we store as a constant in the
+    // surrounding function’s constant table.
+    emitBytes(OP_CONSTANT, makeConstant(OBJ_VAL(function)));
+}
+
+static void funDeclaration() {
+    //  A function declaration at the top level will bind the function to a global variable. Inside
+    //  a block or other function, a function declaration creates a local variable.
+    uint8_t global = parseVariable("Expect function name");
+    // It’s safe for a function to refer to its own name
+    // inside its body. You can’t call the function and execute the body until after it’s fully
+    // defined, so you’ll never see the variable in an uninitialized state. Practically speaking,
+    // it’s useful to allow this in order to support recursive local functions.
+    markInitialized();
+    function(TYPE_FUNCTION);
+    defineVariable(global);
+}
+
 static void statement() {
     if (match(TOKEN_PRINT)) {
         printStatement();
@@ -802,6 +943,8 @@ static void statement() {
         forStatement();
     } else if (match(TOKEN_IF)) {
         ifStatement();
+    } else if (match(TOKEN_RETURN)) {
+        returnStatement();
     } else if (match(TOKEN_WHILE)) {
         whileStatement();
     }
@@ -819,11 +962,11 @@ static void statement() {
 // parser -> generates AST
 // code generator -> reads AST -> generates machine code
 // for LOX, we will build one pass compiler
-bool compile(const char* source, Chunk* chunk) {
+ObjFunction* compile(const char* source) {
     initScanner(source);
     Compiler compiler;
-    initCompiler(&compiler);
-    compilingChunk = chunk;
+    initCompiler(&compiler, TYPE_SCRIPT);
+    // compilingChunk = chunk;
 
     parser.panicMode = false;
     parser.hadError = false;
@@ -837,8 +980,9 @@ bool compile(const char* source, Chunk* chunk) {
     while (!match(TOKEN_EOF)) {
         declaration();
     }
-    endCompiler();
-    return !(parser.hadError);
+    ObjFunction* function = endCompiler();
+    // return !(parser.hadError);
+    return parser.hadError ? NULL : function;
     /** CHAPTER 16 */
     // here for testing purposes
     // int line = -1;

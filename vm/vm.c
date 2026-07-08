@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "chunk.h"
 #include "common.h"
@@ -17,10 +18,19 @@
 // declarations
 VM vm;
 static Value peek(int distance);
+static bool call(ObjFunction* function, int argCount);
+static bool callValue(Value callee, int argCount);
 static bool isFalsy(Value value);
 static void concatenate();
 
-static void resetStack() { vm.stackTop = vm.stack; }
+static Value clockNative(int argCount, Value* args) {
+    return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
+
+static void resetStack() {
+    vm.stackTop = vm.stack;
+    vm.frameCount = 0;
+}
 
 static void runtimeError(const char* format, ...) {
     va_list args;
@@ -29,20 +39,61 @@ static void runtimeError(const char* format, ...) {
     va_end(args);
     fputs("\n", stderr);
 
-    size_t instruction = vm.ip - vm.chunk->code - 1;
-    int line = vm.chunk->lines[instruction];
-    fprintf(stderr, "[line %d] in script\n", line);
+    // size_t instruction = vm.ip - vm.chunk->code - 1;
+    // int line = vm.chunk->lines[instruction];
+    // REPLACED with STACK-TRACE
+    // CallFrame* frame = &vm.frames[vm.frameCount - 1];
+    // size_t instruction = frame->ip - frame->function->chunk.code - 1;
+    // int line = frame->function->chunk.lines[instruction];
+    // fprintf(stderr, "[line %d] in script\n", line);
+    for (int i = vm.frameCount - 1; i >= 0; i--) {
+        CallFrame* frame = &vm.frames[i];
+        ObjFunction* function = frame->function;
+        // The - 1 is because the IP is already sitting on the next instruction to be executed but
+        // we want the stack trace to point to the previous failed instruction.
+        size_t instruction = frame->ip - function->chunk.code - 1;
+        fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
+        if (function->name == NULL) {
+            fprintf(stderr, "script\n");
+        } else {
+            fprintf(stderr, "%s()\n", function->name->chars);
+        }
+    }
     resetStack();
 }
 
+// Without something like a foreign function interface, users can’t define their own native
+// functions. That’s our job as VM implementers. We’ll start with a helper to define a new native
+// function exposed to Lox programs.
+static void defineNative(const char* name, NativeFn function) {
+    push(OBJ_VAL(copyString(name, (int)strlen(name))));
+    push(OBJ_VAL(newNative(function)));
+    tableSet(&vm.globals, AS_STRING(vm.stack[0]), vm.stack[1]);
+    // why we push and pop the name and function on the stack. This is the kind of stuff you have to
+    // worry about when garbage collection gets involved. Both copyString() and newNative()
+    // dynamically allocate memory.
+    // That means once we have a GC, they can potentially trigger a
+    // collection. If that happens, we need to ensure the collector knows we’re not done with the
+    // name and ObjFunction so that it doesn’t free them out from under us. Storing them on the
+    // value stack accomplishes that.
+    pop();
+    pop();
+}
+
 static InterpretResult run() {
-#define READ_BYTE() (*vm.ip++)
+    CallFrame* frame = &vm.frames[vm.frameCount - 1];
+
+// #define READ_BYTE() (*vm.ip++)
+#define READ_BYTE() (*frame->ip++)
+
+// #define READ_SHORT() (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
+#define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+
 // READ_CONSTANT() reads the next byte from the bytecode,
 // treats the resulting number as an index,
 // and looks up the corresponding Value in the chunk’s constant table.
-#define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
-
-#define READ_SHORT() (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
+// #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+#define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
 
 // It reads a one-byte operand from the bytecode chunk. It treats that as an index into the chunk’s
 // constant table and returns the string at that index. It doesn’t check that the value is a
@@ -74,7 +125,9 @@ static InterpretResult run() {
             printf(" ]");
         }
         printf("\n");
-        disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
+        // disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
+        disassembleInstruction(&frame->function->chunk,
+                               (int)(frame->ip - frame->function->chunk.code));
 #endif
         // Given a numeric opcode,
         // we need to get to the right C code that implements that instruction’s semantics.
@@ -104,7 +157,12 @@ static InterpretResult run() {
                 // the value from that index and then pushes it on top of the stack where later
                 // instructions can find it.
                 uint8_t slot = READ_BYTE();
-                push(vm.stack[slot]);
+                // OP_GET_LOCAL read the given local slot directly from the VM’s stack array, which
+                // meant it indexed the slot starting from the bottom of the stack
+                // push(vm.stack[slot]);
+                // now it accesses the current frame’s slots array, which means it accesses the
+                // given numbered slot relative to the beginning of that frame.
+                push(frame->slots[slot]);
                 break;
             }
             case OP_GET_GLOBAL: {
@@ -133,7 +191,8 @@ static InterpretResult run() {
                 // Remember, assignment is an expression, and every expression produces a value.
                 // The value of an assignment expression is the assigned value itself, so the VM
                 // just leaves the value on the stack.
-                vm.stack[slot] = peek(0);
+                // vm.stack[slot] = peek(0);
+                frame->slots[slot] = peek(0);
                 break;
             }
             case OP_SET_GLOBAL: {
@@ -215,7 +274,8 @@ static InterpretResult run() {
             }
             case OP_JUMP: {
                 uint16_t offset = READ_SHORT();
-                vm.ip += offset;
+                // vm.ip += offset;
+                frame->ip += offset;
                 break;
             }
             case OP_JUMP_IF_FALSE: {
@@ -225,17 +285,51 @@ static InterpretResult run() {
                 // the stack that was supposed to get used if the code would have chosen the
                 // <if branch> is still there
                 if (isFalsy(peek(0))) {
-                    vm.ip += offset;
+                    // vm.ip += offset;
+                    frame->ip += offset;
                 }
                 break;
             }
             case OP_LOOP: {
                 uint16_t offset = READ_SHORT();
-                vm.ip -= offset;
+                // vm.ip -= offset;
+                frame->ip -= offset;
+                break;
+            }
+            case OP_CALL: {
+                int argCount = READ_BYTE();
+                // argCount also tells us where to find the function on the stack by counting past
+                // the argument slots from the top of the stack.
+                if (!callValue(peek(argCount), argCount)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // If callValue() is successful, there will be a new frame on the CallFrame stack
+                // for the called function. The run() function has its own cached pointer to the
+                // current frame, so we need to update that.
+                frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
             case OP_RETURN: {
-                return INTERPRET_OK;
+                // When a function returns a value, that value will be on top of the stack. We’re
+                // about to discard the called function’s entire stack window, so we pop that return
+                // value off and hang on to it.
+                Value result = pop();
+
+                // Then we discard the CallFrame for the returning function.
+                vm.frameCount--;
+
+                // If that was the very last CallFrame, it means we’ve finished executing the
+                // top-level code. The entire program is done, so we pop the main script function
+                // from the stack and then exit the interpreter.
+                if (vm.frameCount == 0) {
+                    pop();
+                    return INTERPRET_OK;
+                }
+
+                vm.stackTop = frame->slots;
+                push(result);
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
             }
         }
     }
@@ -247,30 +341,42 @@ static InterpretResult run() {
 #undef BINARY_OP
 }
 
-InterpretResult interpret_chunk(Chunk* chunk) {
-    vm.chunk = chunk;
-    vm.ip = vm.chunk->code;
-    return run();
-}
+// InterpretResult interpret_chunk(Chunk* chunk) {
+//     vm.chunk = chunk;
+//     vm.ip = vm.chunk->code;
+//     return run();
+// }
 
 InterpretResult interpret(const char* source) {
-    printf("%s", source);
-    // We create a new empty chunk and pass it over to the compiler.
-    Chunk chunk;
-    initChunk(&chunk);
+    // printf("%s", source);
+    // // We create a new empty chunk and pass it over to the compiler.
+    // Chunk chunk;
+    // initChunk(&chunk);
 
-    // The compiler will take the user’s program and fill up the chunk with bytecode.
-    if (!compile(source, &chunk)) {
-        // If it does encounter an error, compile() returns false and we discard the unusable chunk.
-        freeChunk(&chunk);
-        return INTERPRET_COMPILE_ERROR;
-    }
+    // // The compiler will take the user’s program and fill up the chunk with bytecode.
+    // if (!compile(source, &chunk)) {
+    //     // If it does encounter an error, compile() returns false and we discard the unusable
+    //     chunk. freeChunk(&chunk); return INTERPRET_COMPILE_ERROR;
+    // }
 
-    vm.chunk = &chunk;
-    vm.ip = vm.chunk->code;
+    // vm.chunk = &chunk;
+    // vm.ip = vm.chunk->code;
+    //
 
-    InterpretResult result = run();
-    return result;
+    // compiler: It returns us a new ObjFunction containing the compiled top-level code.
+    ObjFunction* function = compile(source);
+    if (function == NULL) return INTERPRET_COMPILE_ERROR;
+    // we store the function on the stack and prepare an initial CallFrame to execute its code.
+    push(OBJ_VAL(function));
+    call(function, 0);
+    // CallFrame* frame = &vm.frames[vm.frameCount++];
+    // frame->function = function;
+    // frame->ip = function->chunk.code;
+    // frame->slots = vm.stack;
+
+    // InterpretResult result = run();
+    // return result;
+    return run();
 }
 
 void initVM() {
@@ -278,6 +384,7 @@ void initVM() {
     vm.objects = NULL;
     initTable(&vm.globals);
     initTable(&vm.strings);
+    defineNative("clock", clockNative);
 }
 
 void freeVM() {
@@ -297,6 +404,42 @@ Value pop() {
 }
 
 static Value peek(int distance) { return vm.stackTop[-1 - distance]; }
+
+static bool call(ObjFunction* function, int argCount) {
+    if (argCount != function->arity) {
+        runtimeError("Expected %d arguments but got %d.", function->arity, argCount);
+        return false;
+    }
+    if (vm.frameCount == FRAMES_MAX) {
+        runtimeError("Stack overflow.");
+        return false;
+    }
+    CallFrame* frame = &vm.frames[vm.frameCount++];
+    frame->function = function;
+    frame->ip = function->chunk.code;
+    frame->slots = vm.stackTop - argCount - 1;
+    return true;
+}
+
+static bool callValue(Value callee, int argCount) {
+    if (IS_OBJ(callee)) {
+        switch (OBJ_TYPE(callee)) {
+            case OBJ_FUNCTION:
+                return call(AS_FUNCTION(callee), argCount);
+            case OBJ_NATIVE: {
+                NativeFn native = AS_NATIVE(callee);
+                Value result = native(argCount, vm.stackTop - argCount);
+                vm.stackTop -= argCount + 1;
+                push(result);
+                return true;
+            }
+            default:
+                break;  // Non-callable object type.
+        }
+    }
+    runtimeError("Can only call functions and classes.");
+    return false;
+}
 
 static bool isFalsy(Value value) { return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value)); }
 
