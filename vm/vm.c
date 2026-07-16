@@ -18,8 +18,11 @@
 // declarations
 VM vm;
 static Value peek(int distance);
-static bool call(ObjFunction* function, int argCount);
+// static bool call(ObjFunction* function, int argCount);
+static bool call(ObjClosure* closure, int argCount);
 static bool callValue(Value callee, int argCount);
+static ObjUpvalue* captureUpvalue(Value* local);
+static void closeUpvalues(Value* last);
 static bool isFalsy(Value value);
 static void concatenate();
 
@@ -30,6 +33,7 @@ static Value clockNative(int argCount, Value* args) {
 static void resetStack() {
     vm.stackTop = vm.stack;
     vm.frameCount = 0;
+    vm.openUpvalues = NULL;
 }
 
 static void runtimeError(const char* format, ...) {
@@ -48,7 +52,7 @@ static void runtimeError(const char* format, ...) {
     // fprintf(stderr, "[line %d] in script\n", line);
     for (int i = vm.frameCount - 1; i >= 0; i--) {
         CallFrame* frame = &vm.frames[i];
-        ObjFunction* function = frame->function;
+        ObjFunction* function = frame->closure->function;
         // The - 1 is because the IP is already sitting on the next instruction to be executed but
         // we want the stack trace to point to the previous failed instruction.
         size_t instruction = frame->ip - function->chunk.code - 1;
@@ -93,7 +97,8 @@ static InterpretResult run() {
 // treats the resulting number as an index,
 // and looks up the corresponding Value in the chunk’s constant table.
 // #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
-#define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
+// #define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
+#define READ_CONSTANT() (frame->closure->function->chunk.constants.values[READ_BYTE()])
 
 // It reads a one-byte operand from the bytecode chunk. It treats that as an index into the chunk’s
 // constant table and returns the string at that index. It doesn’t check that the value is a
@@ -126,8 +131,8 @@ static InterpretResult run() {
         }
         printf("\n");
         // disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
-        disassembleInstruction(&frame->function->chunk,
-                               (int)(frame->ip - frame->function->chunk.code));
+        disassembleInstruction(&frame->closure->function->chunk,
+                               (int)(frame->ip - frame->closure->function->chunk.code));
 #endif
         // Given a numeric opcode,
         // we need to get to the right C code that implements that instruction’s semantics.
@@ -209,6 +214,16 @@ static InterpretResult run() {
                 // The other difference is that setting a variable doesn’t pop the value off the
                 // stack. Remember, assignment is an expression, so it needs to leave that value
                 // there in case the assignment is nested inside some larger expression.
+                break;
+            }
+            case OP_GET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                push(*frame->closure->upvalues[slot]->location);
+                break;
+            }
+            case OP_SET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                *frame->closure->upvalues[slot]->location = peek(0);
                 break;
             }
             case OP_EQUAL: {
@@ -309,12 +324,54 @@ static InterpretResult run() {
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_CLOSURE: {
+                ObjFunction* fun = AS_FUNCTION(READ_CONSTANT());
+                ObjClosure* closure = newClosure(fun);
+                // Closures capture [variables]. You can think of them as capturing the
+                // place the value lives. This is important to keep in mind as we deal with
+                // closed-over variables that are no longer on the stack. When a variable moves to
+                // the heap, we need to ensure that all closures capturing that variable retain a
+                // reference to its one new location. That way, when the variable is mutated, all
+                // closures see the change.
+                // We know that local variables always start out on the stack. This is faster, and
+                // lets our single-pass compiler emit code before it discovers the variable has been
+                // captured. We also know that closed-over variables need to move to the heap if the
+                // closure outlives the function where the captured variable is declared.
+                push(OBJ_VAL(closure));
+                for (int i = 0; i < closure->upvalueCount; i++) {
+                    uint8_t isLocal = READ_BYTE();
+                    uint8_t index = READ_BYTE();
+                    if (isLocal) {
+                        closure->upvalues[i] = captureUpvalue(frame->slots + index);
+                    } else {
+                        // MEGA COOL
+                        // Otherwise, we capture an upvalue from the surrounding function. An
+                        // OP_CLOSURE instruction is emitted at the end of a function declaration.
+                        // At the moment that we are executing that declaration, the current
+                        // function is the surrounding one. That means the current function’s
+                        // closure is stored in the CallFrame at the top of the callstack. So, to
+                        // grab an upvalue from the enclosing function, we can read it right from
+                        // the frame local variable, which caches a reference to that CallFrame.
+                        closure->upvalues[i] = frame->closure->upvalues[index];
+                    }
+                }
+                break;
+            }
+            case OP_CLOSE_UPVALUE: {
+                closeUpvalues(vm.stackTop - 1);
+                pop();
+                break;
+            }
             case OP_RETURN: {
                 // When a function returns a value, that value will be on top of the stack. We’re
                 // about to discard the called function’s entire stack window, so we pop that return
                 // value off and hang on to it.
                 Value result = pop();
-
+                // By passing the first slot in the function’s stack window, we close every
+                // remaining open upvalue owned by the returning function. And with that, we now
+                // have a fully functioning closure implementation. Closed-over variables live as
+                // long as they are needed by the functions that capture them.
+                closeUpvalues(frame->slots);
                 // Then we discard the CallFrame for the returning function.
                 vm.frameCount--;
 
@@ -365,10 +422,11 @@ InterpretResult interpret(const char* source) {
 
     // compiler: It returns us a new ObjFunction containing the compiled top-level code.
     ObjFunction* function = compile(source);
+    ObjClosure* closure = newClosure(function);
     if (function == NULL) return INTERPRET_COMPILE_ERROR;
     // we store the function on the stack and prepare an initial CallFrame to execute its code.
-    push(OBJ_VAL(function));
-    call(function, 0);
+    push(OBJ_VAL(closure));
+    call(closure, 0);
     // CallFrame* frame = &vm.frames[vm.frameCount++];
     // frame->function = function;
     // frame->ip = function->chunk.code;
@@ -405,9 +463,10 @@ Value pop() {
 
 static Value peek(int distance) { return vm.stackTop[-1 - distance]; }
 
-static bool call(ObjFunction* function, int argCount) {
-    if (argCount != function->arity) {
-        runtimeError("Expected %d arguments but got %d.", function->arity, argCount);
+// static bool call(ObjFunction* function, int argCount) {
+static bool call(ObjClosure* closure, int argCount) {
+    if (argCount != closure->function->arity) {
+        runtimeError("Expected %d arguments but got %d.", closure->function->arity, argCount);
         return false;
     }
     if (vm.frameCount == FRAMES_MAX) {
@@ -415,8 +474,9 @@ static bool call(ObjFunction* function, int argCount) {
         return false;
     }
     CallFrame* frame = &vm.frames[vm.frameCount++];
-    frame->function = function;
-    frame->ip = function->chunk.code;
+    // frame->function = function;
+    frame->closure = closure;
+    frame->ip = closure->function->chunk.code;
     frame->slots = vm.stackTop - argCount - 1;
     return true;
 }
@@ -424,8 +484,14 @@ static bool call(ObjFunction* function, int argCount) {
 static bool callValue(Value callee, int argCount) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
-            case OBJ_FUNCTION:
-                return call(AS_FUNCTION(callee), argCount);
+                // case OBJ_FUNCTION:
+                //     return call(AS_FUNCTION(callee), argCount);
+                // [NOTE] Since we wrap all functions in ObjClosures, the runtime will never try to
+                // invoke a bare ObjFunction anymore. Those objects live only in constant tables and
+                // get immediately wrapped in closures before anything else sees them.
+            case OBJ_CLOSURE: {
+                return call(AS_CLOSURE(callee), argCount);
+            }
             case OBJ_NATIVE: {
                 NativeFn native = AS_NATIVE(callee);
                 Value result = native(argCount, vm.stackTop - argCount);
@@ -441,7 +507,44 @@ static bool callValue(Value callee, int argCount) {
     return false;
 }
 
+static ObjUpvalue* captureUpvalue(Value* local) {
+    ObjUpvalue* prevUpvalue = NULL;
+    ObjUpvalue* upvalue = vm.openUpvalues;
+    // trace the linked list
+    // Even better, we can order the list of open upvalues by the stack slot index they point to.
+    // The common case is that a slot has not already been captured—sharing variables between
+    // closures is uncommon—and closures tend to capture locals near the top of the stack. If we
+    // store the open upvalue array in stack slot order, as soon as we step past the slot where the
+    // local we’re capturing lives, we know it won’t be found. When that local is near the top of
+    // the stack, we can exit the loop pretty early.
+    while (upvalue != NULL && upvalue->location > local) {
+        prevUpvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+    if (upvalue != NULL && upvalue->location == local) {
+        return upvalue;
+    }
+    ObjUpvalue* createdUpvalue = newUpvalue(local);
+    createdUpvalue->next = upvalue;
+
+    if (prevUpvalue == NULL) {
+        vm.openUpvalues = createdUpvalue;
+    } else {
+        prevUpvalue->next = createdUpvalue;
+    }
+    return createdUpvalue;
+}
+
 static bool isFalsy(Value value) { return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value)); }
+
+static void closeUpvalues(Value* last) {
+    while (vm.openUpvalues != NULL && vm.openUpvalues->location >= last) {
+        ObjUpvalue* upvalue = vm.openUpvalues;
+        upvalue->closed = *upvalue->location;
+        upvalue->location = &upvalue->closed;
+        vm.openUpvalues = upvalue->next;
+    }
+}
 
 static void concatenate() {
     ObjString* b = AS_STRING(pop());

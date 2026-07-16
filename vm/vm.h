@@ -17,9 +17,10 @@
 // begin, and where the caller should resume.
 // A CallFrame represents a single ongoing function call.
 typedef struct {
+    ObjClosure* closure;
     // pointer to the function being called in here. We’ll use that to look up constants and for a
     // few other things.
-    ObjFunction* function;
+    // ObjFunction* function;
     uint8_t* ip;
     // slots field points into the [[[VM’s value stack]]] at the [[[first slot]]] that
     // [[[this-function]]] can use.
@@ -47,6 +48,9 @@ typedef struct {
     // In order to reliably deduplicate all strings, the VM needs to be able to find every string
     // that’s created
     Table strings;
+    // to make sure all the defined closure close over VARIABLE and not VALUE
+    // SHARE VARIABLES
+    ObjUpvalue* openUpvalues;
     // reference of all the objects that are heap allocated
     Obj* objects;
 } VM;

@@ -23,15 +23,19 @@ typedef enum {
     OP_FALSE,
     // evaluate expression for assignment
     OP_POP,
+    // Variable GET
     // local var
     OP_GET_LOCAL,
     // read global var
     OP_GET_GLOBAL,
     // define global variables
     OP_DEFINE_GLOBAL,
+    OP_GET_UPVALUE,
+    // Variable SET
     OP_SET_LOCAL,
     // assignment
     OP_SET_GLOBAL,
+    OP_SET_UPVALUE,
     // ==, !=, <, >, <=, and >=
     // The expression a != b has the same semantics as !(a == b), so the compiler is free to compile
     // the former as if it were the latter. Instead of a dedicated OP_NOT_EQUAL instruction, it can
@@ -57,6 +61,13 @@ typedef enum {
     OP_LOOP,
     // function call
     OP_CALL,
+    // it takes a single operand that represents a constant table index for the function.
+    // it wraps the function
+    OP_CLOSURE,
+    // when we are about to hoist a captured value from stack to heap
+    // The instruction requires no operand. We know that the variable will always be right on top of
+    // the stack at the point that this instruction executes. We declare the instruction.
+    OP_CLOSE_UPVALUE,
     // pops off the last stack value and returns
     OP_RETURN,
 } OpCode;
