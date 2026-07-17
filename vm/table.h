@@ -26,5 +26,7 @@ void tableAddAll(Table* from, Table* to);
 // findEntry(), which has the exact problem with duplicate strings that we’re trying to fix right
 // now. Instead, we use this new function:
 ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t hash);
+void tableRemoveWhite(Table* table);
+void markTable(Table* table);
 
 #endif

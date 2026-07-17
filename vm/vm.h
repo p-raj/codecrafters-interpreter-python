@@ -51,6 +51,13 @@ typedef struct {
     // to make sure all the defined closure close over VARIABLE and not VALUE
     // SHARE VARIABLES
     ObjUpvalue* openUpvalues;
+    // for GC - maintaining work queue
+    int grayCount;
+    int grayCapacity;
+    Obj** grayStack;
+    // GC optimization | latency and throughput tradeoff
+    size_t bytesAllocated;
+    size_t nextGC;
     // reference of all the objects that are heap allocated
     Obj* objects;
 } VM;

@@ -31,6 +31,8 @@ typedef enum {
 // when you nest structs, the inner struct’s fields are expanded right in place.
 struct Obj {
     ObjType type;
+    // GC - mark phase
+    bool isMarked;
     struct Obj* next;
 };
 
