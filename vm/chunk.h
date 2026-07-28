@@ -42,6 +42,8 @@ typedef enum {
     // output an OP_EQUAL followed by an OP_NOT. Likewise, a <= b is the same as !(a > b) and a >= b
     // is !(a < b). Thus, we only need three new instructions.
     OP_EQUAL,
+    OP_GET_PROPERTY,
+    OP_SET_PROPERTY,
     OP_GREATER,
     OP_LESS,
     // OP-CODE => 1 byte
@@ -70,6 +72,7 @@ typedef enum {
     OP_CLOSE_UPVALUE,
     // pops off the last stack value and returns
     OP_RETURN,
+    OP_CLASS,
 } OpCode;
 
 // Bytecode is a series of instructions.

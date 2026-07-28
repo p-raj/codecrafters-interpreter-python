@@ -77,6 +77,10 @@ int disassembleInstruction(Chunk* chunk, int offset) {
             return byteInstruction("OP_SET_UPVALUE", chunk, offset);
         case OP_EQUAL:
             return simpleInstruction("OP_EQUAL", offset);
+        case OP_GET_PROPERTY:
+            return constantInstruction("OP_GET_PROPERTY", chunk, offset);
+        case OP_SET_PROPERTY:
+            return constantInstruction("OP_SET_PROPERTY", chunk, offset);
         case OP_GREATER:
             return simpleInstruction("OP_GREATER", offset);
         case OP_LESS:
@@ -101,8 +105,6 @@ int disassembleInstruction(Chunk* chunk, int offset) {
             return jumpInstruction("OP_LOOP", -1, chunk, offset);
         case OP_CLOSE_UPVALUE:
             return simpleInstruction("OP_CLOSE_UPVALUE", offset);
-        case OP_RETURN:
-            return simpleInstruction("OP_RETURN", offset);
         case OP_PRINT:
             return simpleInstruction("OP_PRINT", offset);
         case OP_CALL:
@@ -121,6 +123,11 @@ int disassembleInstruction(Chunk* chunk, int offset) {
                        isLocal ? "local" : "upvalue", index);
             }
             return offset;
+        }
+        case OP_RETURN:
+            return simpleInstruction("OP_RETURN", offset);
+        case OP_CLASS: {
+            return constantInstruction("OP_CLASS", chunk, offset);
         }
         default:
             printf("Unknown opcode %d\n", instruction);

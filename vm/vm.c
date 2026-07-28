@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -226,6 +227,36 @@ static InterpretResult run() {
                 *frame->closure->upvalues[slot]->location = peek(0);
                 break;
             }
+            case OP_GET_PROPERTY: {
+                if (!IS_INSTANCE(peek(0))) {
+                    runtimeError("Only instances have properties.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                ObjInstance* instance = AS_INSTANCE(peek(0));
+                ObjString* name = READ_STRING();
+
+                Value value;
+                if (tableGet(&instance->fields, name, &value)) {
+                    pop();  // Instance.
+                    push(value);
+                    break;
+                }
+                runtimeError("Undefined property '%s'.", name->chars);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case OP_SET_PROPERTY: {
+                if (!IS_INSTANCE(peek(1))) {
+                    runtimeError("Only instances have fields.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                ObjInstance* instance = AS_INSTANCE(peek(1));
+                tableSet(&instance->fields, READ_STRING(), peek(0));
+                Value value = pop();
+                pop();
+                push(value);
+                break;
+            }
             case OP_EQUAL: {
                 Value b = pop();
                 Value a = pop();
@@ -278,11 +309,11 @@ static InterpretResult run() {
             case OP_PRINT: {
                 // Note that we don’t push anything else after that.
                 // This is a key difference between expressions and statements in the VM.
-                // Every bytecode instruction has a stack effect that describes how the instruction
-                // modifies the stack.
-                // The bytecode for an entire statement has a total stack effect of zero.
-                // [NOTE], each statement is required to have zero stack effect—after the
-                // statement is finished executing, the stack should be as tall as it was before.
+                // Every bytecode instruction has a stack effect that describes how the
+                // instruction modifies the stack. The bytecode for an entire statement has a
+                // total stack effect of zero. [NOTE], each statement is required to have zero
+                // stack effect—after the statement is finished executing, the stack should be
+                // as tall as it was before.
                 printValue(pop());
                 printf("\n");
                 break;
@@ -313,14 +344,14 @@ static InterpretResult run() {
             }
             case OP_CALL: {
                 int argCount = READ_BYTE();
-                // argCount also tells us where to find the function on the stack by counting past
-                // the argument slots from the top of the stack.
+                // argCount also tells us where to find the function on the stack by counting
+                // past the argument slots from the top of the stack.
                 if (!callValue(peek(argCount), argCount)) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // If callValue() is successful, there will be a new frame on the CallFrame stack
-                // for the called function. The run() function has its own cached pointer to the
-                // current frame, so we need to update that.
+                // If callValue() is successful, there will be a new frame on the CallFrame
+                // stack for the called function. The run() function has its own cached pointer
+                // to the current frame, so we need to update that.
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
@@ -329,14 +360,14 @@ static InterpretResult run() {
                 ObjClosure* closure = newClosure(fun);
                 // Closures capture [variables]. You can think of them as capturing the
                 // place the value lives. This is important to keep in mind as we deal with
-                // closed-over variables that are no longer on the stack. When a variable moves to
-                // the heap, we need to ensure that all closures capturing that variable retain a
-                // reference to its one new location. That way, when the variable is mutated, all
-                // closures see the change.
-                // We know that local variables always start out on the stack. This is faster, and
-                // lets our single-pass compiler emit code before it discovers the variable has been
-                // captured. We also know that closed-over variables need to move to the heap if the
-                // closure outlives the function where the captured variable is declared.
+                // closed-over variables that are no longer on the stack. When a variable moves
+                // to the heap, we need to ensure that all closures capturing that variable
+                // retain a reference to its one new location. That way, when the variable is
+                // mutated, all closures see the change. We know that local variables always
+                // start out on the stack. This is faster, and lets our single-pass compiler
+                // emit code before it discovers the variable has been captured. We also know
+                // that closed-over variables need to move to the heap if the closure outlives
+                // the function where the captured variable is declared.
                 push(OBJ_VAL(closure));
                 for (int i = 0; i < closure->upvalueCount; i++) {
                     uint8_t isLocal = READ_BYTE();
@@ -346,12 +377,13 @@ static InterpretResult run() {
                     } else {
                         // MEGA COOL
                         // Otherwise, we capture an upvalue from the surrounding function. An
-                        // OP_CLOSURE instruction is emitted at the end of a function declaration.
-                        // At the moment that we are executing that declaration, the current
-                        // function is the surrounding one. That means the current function’s
-                        // closure is stored in the CallFrame at the top of the callstack. So, to
-                        // grab an upvalue from the enclosing function, we can read it right from
-                        // the frame local variable, which caches a reference to that CallFrame.
+                        // OP_CLOSURE instruction is emitted at the end of a function
+                        // declaration. At the moment that we are executing that declaration,
+                        // the current function is the surrounding one. That means the current
+                        // function’s closure is stored in the CallFrame at the top of the
+                        // callstack. So, to grab an upvalue from the enclosing function, we can
+                        // read it right from the frame local variable, which caches a reference
+                        // to that CallFrame.
                         closure->upvalues[i] = frame->closure->upvalues[index];
                     }
                 }
@@ -363,21 +395,21 @@ static InterpretResult run() {
                 break;
             }
             case OP_RETURN: {
-                // When a function returns a value, that value will be on top of the stack. We’re
-                // about to discard the called function’s entire stack window, so we pop that return
-                // value off and hang on to it.
+                // When a function returns a value, that value will be on top of the stack.
+                // We’re about to discard the called function’s entire stack window, so we pop
+                // that return value off and hang on to it.
                 Value result = pop();
                 // By passing the first slot in the function’s stack window, we close every
                 // remaining open upvalue owned by the returning function. And with that, we now
-                // have a fully functioning closure implementation. Closed-over variables live as
-                // long as they are needed by the functions that capture them.
+                // have a fully functioning closure implementation. Closed-over variables live
+                // as long as they are needed by the functions that capture them.
                 closeUpvalues(frame->slots);
                 // Then we discard the CallFrame for the returning function.
                 vm.frameCount--;
 
                 // If that was the very last CallFrame, it means we’ve finished executing the
-                // top-level code. The entire program is done, so we pop the main script function
-                // from the stack and then exit the interpreter.
+                // top-level code. The entire program is done, so we pop the main script
+                // function from the stack and then exit the interpreter.
                 if (vm.frameCount == 0) {
                     pop();
                     return INTERPRET_OK;
@@ -386,6 +418,10 @@ static InterpretResult run() {
                 vm.stackTop = frame->slots;
                 push(result);
                 frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
+            case OP_CLASS: {
+                push(OBJ_VAL(newClass(READ_STRING())));
                 break;
             }
         }
@@ -492,11 +528,24 @@ static bool call(ObjClosure* closure, int argCount) {
 static bool callValue(Value callee, int argCount) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
+            case OBJ_CLASS: {
+                // When you call a class like var b = Brioche(1, 2);:
+                // The stack initially holds: [ ... | Brioche (class) | arg1 | arg2 ].
+                // newInstance(klass) creates the new Brioche instance object.
+                // This assignment overwrites Brioche (class) on the stack with the new
+                // instance: [ ... | Brioche instance | arg1 | arg2 ]. This effectively replaces
+                // the class object with the newly created instance while keeping the arguments
+                // in place for any constructor/initializer method that runs afterward.
+                ObjClass* klass = AS_CLASS(callee);
+                vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+                return true;
+            }
                 // case OBJ_FUNCTION:
                 //     return call(AS_FUNCTION(callee), argCount);
-                // [NOTE] Since we wrap all functions in ObjClosures, the runtime will never try to
-                // invoke a bare ObjFunction anymore. Those objects live only in constant tables and
-                // get immediately wrapped in closures before anything else sees them.
+                // [NOTE] Since we wrap all functions in ObjClosures, the runtime will never try
+                // to invoke a bare ObjFunction anymore. Those objects live only in constant
+                // tables and get immediately wrapped in closures before anything else sees
+                // them.
             case OBJ_CLOSURE: {
                 return call(AS_CLOSURE(callee), argCount);
             }
@@ -519,12 +568,12 @@ static ObjUpvalue* captureUpvalue(Value* local) {
     ObjUpvalue* prevUpvalue = NULL;
     ObjUpvalue* upvalue = vm.openUpvalues;
     // trace the linked list
-    // Even better, we can order the list of open upvalues by the stack slot index they point to.
-    // The common case is that a slot has not already been captured—sharing variables between
-    // closures is uncommon—and closures tend to capture locals near the top of the stack. If we
-    // store the open upvalue array in stack slot order, as soon as we step past the slot where the
-    // local we’re capturing lives, we know it won’t be found. When that local is near the top of
-    // the stack, we can exit the loop pretty early.
+    // Even better, we can order the list of open upvalues by the stack slot index they point
+    // to. The common case is that a slot has not already been captured—sharing variables
+    // between closures is uncommon—and closures tend to capture locals near the top of the
+    // stack. If we store the open upvalue array in stack slot order, as soon as we step past
+    // the slot where the local we’re capturing lives, we know it won’t be found. When that
+    // local is near the top of the stack, we can exit the loop pretty early.
     while (upvalue != NULL && upvalue->location > local) {
         prevUpvalue = upvalue;
         upvalue = upvalue->next;

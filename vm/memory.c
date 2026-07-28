@@ -5,6 +5,7 @@
 #include "chunk.h"
 #include "compiler.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 #include "vm.h"
 
@@ -87,6 +88,17 @@ static void blackenObject(Obj* object) {
     // of “black” in the object’s state. A black object is any object whose isMarked field is set
     // and that is no longer in the gray stack.
     switch (object->type) {
+        case OBJ_CLASS: {
+            ObjClass* klass = (ObjClass*)object;
+            markObject((Obj*)klass);
+            break;
+        }
+        case OBJ_INSTANCE: {
+            ObjInstance* instance = (ObjInstance*)object;
+            markObject((Obj*)instance->klass);
+            markTable(&instance->fields);
+            break;
+        }
         case OBJ_UPVALUE: {
             // When an upvalue is closed, it contains a reference to the closed-over value. Since
             // the value is no longer on the stack, we need to make sure we trace the reference to
@@ -147,6 +159,10 @@ static void freeObject(Obj* object) {
     printf("%p free type %d\n", (void*)object, object->type);
 #endif
     switch (object->type) {
+        case OBJ_CLASS: {
+            FREE(ObjClass, object);
+            break;
+        }
         case OBJ_CLOSURE: {
             // We free only the ObjClosure itself, not the ObjFunction. That’s because the closure
             // doesn’t own the function
@@ -161,6 +177,12 @@ static void freeObject(Obj* object) {
             ObjFunction* fn = (ObjFunction*)object;
             freeChunk(&fn->chunk);
             FREE(ObjFunction, object);
+            break;
+        }
+        case OBJ_INSTANCE: {
+            ObjInstance* instance = (ObjInstance*)object;
+            freeTable(&instance->fields);
+            FREE(ObjInstance, object);
             break;
         }
         case OBJ_NATIVE: {
