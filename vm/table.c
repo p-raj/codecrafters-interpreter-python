@@ -27,7 +27,17 @@ void freeTable(Table* table) {
 
 static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
     Entry* tombstone = NULL;
-    uint32_t index = key->hash % capacity;
+    // uint32_t index = key->hash % capacity;
+    // We use modulo here to take a key string’s hash code and wrap it to fit within the bounds of
+    // the table’s entry array. That array starts out at eight elements and grows by a factor of two
+    // each time. We know—and the CPU and C compiler do not—that our table’s size is always a power
+    // of two.
+    // In other words, you can calculate a number modulo any power of two by simply AND-ing
+    // it with that power of two minus one. I’m not enough of a mathematician to prove to you that
+    // this works, but if you think it through, it should make sense. We can replace that slow
+    // modulo operator with a very fast decrement and bitwise AND. We simply change the offending
+    // line of code to this:
+    uint32_t index = key->hash & (capacity - 1);
     for (;;) {
         Entry* entry = &entries[index];
         if (entry->key == NULL) {
