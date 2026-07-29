@@ -36,6 +36,7 @@ typedef enum {
     // assignment
     OP_SET_GLOBAL,
     OP_SET_UPVALUE,
+    OP_GET_SUPER,
     // ==, !=, <, >, <=, and >=
     // The expression a != b has the same semantics as !(a == b), so the compiler is free to compile
     // the former as if it were the latter. Instead of a dedicated OP_NOT_EQUAL instruction, it can
@@ -67,6 +68,7 @@ typedef enum {
     // OP_CALL instructions it replaces, in that order. It really is a fusion of those two
     // instructions.
     OP_INVOKE,
+    OP_SUPER_INVOKE,
     // it takes a single operand that represents a constant table index for the function.
     // it wraps the function
     OP_CLOSURE,
@@ -77,6 +79,7 @@ typedef enum {
     // pops off the last stack value and returns
     OP_RETURN,
     OP_CLASS,
+    OP_INHERIT,
     OP_METHOD,
 } OpCode;
 

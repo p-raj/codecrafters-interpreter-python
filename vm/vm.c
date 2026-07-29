@@ -267,6 +267,15 @@ static InterpretResult run() {
                 push(value);
                 break;
             }
+            case OP_GET_SUPER: {
+                ObjString* name = READ_STRING();
+                ObjClass* superclass = AS_CLASS(pop());
+
+                if (!bindMethod(superclass, name)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case OP_EQUAL: {
                 Value b = pop();
                 Value a = pop();
@@ -376,6 +385,23 @@ static InterpretResult run() {
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_SUPER_INVOKE: {
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                ObjClass* superclass = AS_CLASS(pop());
+                if (!invokeFromClass(superclass, method, argCount)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // We pass the superclass, method name, and argument count to our existing
+                // invokeFromClass() function. That function looks up the given method on the given
+                // class and attempts to create a call to it with the given arity. If a method could
+                // not be found, it returns false, and we bail out of the interpreter. Otherwise,
+                // invokeFromClass() pushes a new CallFrame onto the call stack for the method’s
+                // closure. That invalidates the interpreter’s cached CallFrame pointer, so we
+                // refresh frame.
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
             case OP_CLOSURE: {
                 ObjFunction* fun = AS_FUNCTION(READ_CONSTANT());
                 ObjClosure* closure = newClosure(fun);
@@ -443,6 +469,32 @@ static InterpretResult run() {
             }
             case OP_CLASS: {
                 push(OBJ_VAL(newClass(READ_STRING())));
+                break;
+            }
+            case OP_INHERIT: {
+                Value superclass = peek(1);
+                if (!IS_CLASS(superclass)) {
+                    runtimeError("Superclass must be a class.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                ObjClass* subclass = AS_CLASS(peek(0));
+                // The new approach is much faster. When the subclass is declared, we copy all of
+                // the inherited class’s methods down into the subclass’s own method table. Later,
+                // when calling a method, any method inherited from a superclass will be found right
+                // in the subclass’s own method table. There is no extra runtime work needed for
+                // inheritance at all. By the time the class is declared, the work is done. This
+                // means inherited method calls are exactly as fast as normal method calls—a single
+                // hash table lookup.
+                // What about method overrides? Won’t copying the superclass’s methods into the
+                // subclass’s method table clash with the subclass’s own methods? Fortunately, no.
+                // We emit the OP_INHERIT after the OP_CLASS instruction that creates the subclass
+                // but before any method declarations and OP_METHOD instructions have been compiled.
+                // At the point that we copy the superclass’s methods down, the subclass’s method
+                // table is empty. Any methods the subclass overrides will overwrite those inherited
+                // entries in the table.
+                tableAddAll(&AS_CLASS(superclass)->methods, &subclass->methods);
+                pop();  // Subclass.
+                break;
                 break;
             }
             case OP_METHOD: {

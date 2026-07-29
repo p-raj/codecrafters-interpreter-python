@@ -127,6 +127,7 @@ typedef struct Compiler {
 // current innermost class being compiled out through all of the enclosing classes.
 typedef struct ClassCompiler {
     struct ClassCompiler* enclosing;
+    bool hasSuperclass;
 } ClassCompiler;
 
 Parser parser;
@@ -600,6 +601,53 @@ static void namedVariable(Token name, bool canAssign) {
 
 static void variable(bool canAssign) { namedVariable(parser.previous, canAssign); }
 
+static Token syntheticToken(const char* text) {
+    Token token;
+    token.start = text;
+    token.length = (int)strlen(text);
+    return token;
+}
+
+static void super_(bool canAssign) {
+    if (currentClass == NULL) {
+        error("Can't use 'super' outside of a class.");
+    } else if (!currentClass->hasSuperclass) {
+        error("Can't use 'super' in a class with no superclass.");
+    }
+
+    consume(TOKEN_DOT, "Expect '.' after 'super'.");
+    consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
+    uint8_t name = identifierConstant(&parser.previous);
+    // In other words, Lox doesn’t really have super call expressions, it has super access
+    // expressions, which you can choose to immediately invoke if you want. So when the compiler
+    // hits a super token, we consume the subsequent . token and then look for a method name.
+    // Methods are looked up dynamically, so we use identifierConstant() to take the lexeme of the
+    // method name token and store it in the constant table just like we do for property access
+    // expressions.
+    namedVariable(syntheticToken("this"), false);
+    // namedVariable(syntheticToken("super"), false);
+    // In order to access a superclass method on the current instance, the runtime needs both the
+    // receiver and the superclass of the surrounding method’s class. The first namedVariable() call
+    // generates code to look up the current receiver stored in the hidden variable “this” and push
+    // it onto the stack. The second namedVariable() call emits code to look up the superclass from
+    // its “super” variable and push that on top.
+    // emitBytes(OP_GET_SUPER, name);
+    if (match(TOKEN_LEFT_PAREN)) {
+        // Now before we emit anything, we look for a parenthesized argument list. If we find one,
+        // we compile that. Then we load the superclass. After that, we emit a new OP_SUPER_INVOKE
+        // instruction. This superinstruction combines the behavior of OP_GET_SUPER and OP_CALL, so
+        // it takes two operands: the constant table index of the method name to look up and the
+        // number of arguments to pass to it.
+        uint8_t argCount = argumentList();
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(OP_SUPER_INVOKE, name);
+        emitByte(argCount);
+    } else {
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(OP_GET_SUPER, name);
+    }
+}
+
 static void this_(bool canAssign) {
     // print this; // At top level.
     // fun notMethod() {
@@ -812,7 +860,7 @@ ParseRule rules[] = {
   [TOKEN_OR]            = {NULL,     or_,   PREC_OR},
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
-  [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_SUPER]         = {super_,   NULL,   PREC_NONE},
   // The underscore at the end of the name of the parser function is
   // because this is a reserved word in C++ and we support compiling clox as C++.
   // same as class -> klass
@@ -1150,8 +1198,43 @@ static void classDeclaration() {
     // When the compiler begins compiling a class, it pushes a new ClassCompiler onto that implicit
     // linked stack.
     ClassCompiler classCompiler;
+    classCompiler.hasSuperclass = false;
     classCompiler.enclosing = currentClass;
     currentClass = &classCompiler;
+
+    // inheritance
+    /**
+     * class Doughnut {
+       cook() {
+         print "Dunk in the fryer.";
+       }
+     }
+
+     class Cruller < Doughnut {
+       finish() {
+         print "Glaze with icing.";
+       }
+     }
+     */
+    if (match(TOKEN_LESS)) {
+        consume(TOKEN_IDENTIFIER, "Expect superclass name.");
+        // it looks up the superclass by name and pushes it onto the stack.
+        variable(false);
+        if (identifiersEqual(&className, &parser.previous)) {
+            error("A class can't inherit from itself.");
+        }
+
+        beginScope();
+        // We name the variable “super” for the same reason we use “this” as the name of the hidden
+        // local variable that this expressions resolve to: “super” is a reserved word, which
+        // guarantees the compiler’s hidden variable won’t collide with a user-defined one.
+        addLocal(syntheticToken("super"));
+        defineVariable(0);
+
+        namedVariable(className, false);
+        emitByte(OP_INHERIT);
+        classCompiler.hasSuperclass = true;
+    }
 
     // That helper function generates code to load a variable with the given name onto the stack.
     namedVariable(className, false);
@@ -1164,6 +1247,9 @@ static void classDeclaration() {
     // closure on top with the class right under it. Once we’ve reached the end of the methods, we
     // no longer need the class and tell the VM to pop it off the stack.
     emitByte(OP_POP);
+    if (classCompiler.hasSuperclass) {
+        endScope();
+    }
     currentClass = currentClass->enclosing;
 }
 
