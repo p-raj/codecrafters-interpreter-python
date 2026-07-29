@@ -22,8 +22,12 @@ static Value peek(int distance);
 // static bool call(ObjFunction* function, int argCount);
 static bool call(ObjClosure* closure, int argCount);
 static bool callValue(Value callee, int argCount);
+static bool invokeFromClass(ObjClass* klass, ObjString* name, int argCount);
+static bool invoke(ObjString* name, int argCount);
+static bool bindMethod(ObjClass* klass, ObjString* name);
 static ObjUpvalue* captureUpvalue(Value* local);
 static void closeUpvalues(Value* last);
+static void defineMethod(ObjString* name);
 static bool isFalsy(Value value);
 static void concatenate();
 
@@ -236,14 +240,20 @@ static InterpretResult run() {
                 ObjInstance* instance = AS_INSTANCE(peek(0));
                 ObjString* name = READ_STRING();
 
+                // We insert this after the code to look up a field on the receiver instance. Fields
+                // take priority over and shadow methods, so we look for a field first. If the
+                // instance does not have a field with the given property name, then the name may
+                // refer to a method.
                 Value value;
                 if (tableGet(&instance->fields, name, &value)) {
                     pop();  // Instance.
                     push(value);
                     break;
                 }
-                runtimeError("Undefined property '%s'.", name->chars);
-                return INTERPRET_RUNTIME_ERROR;
+                if (!bindMethod(instance->klass, name)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
             }
             case OP_SET_PROPERTY: {
                 if (!IS_INSTANCE(peek(1))) {
@@ -355,6 +365,17 @@ static InterpretResult run() {
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_INVOKE: {
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                if (!invoke(method, argCount)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // there is a new CallFrame on the stack, so we refresh our cached copy of the
+                // current frame in frame.
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
             case OP_CLOSURE: {
                 ObjFunction* fun = AS_FUNCTION(READ_CONSTANT());
                 ObjClosure* closure = newClosure(fun);
@@ -424,6 +445,10 @@ static InterpretResult run() {
                 push(OBJ_VAL(newClass(READ_STRING())));
                 break;
             }
+            case OP_METHOD: {
+                defineMethod(READ_STRING());
+                break;
+            }
         }
     }
 
@@ -486,12 +511,21 @@ void initVM() {
 
     initTable(&vm.globals);
     initTable(&vm.strings);
+    // Look carefully. See any bug waiting to happen? No? It’s a subtle one. The garbage collector
+    // now reads vm.initString. That field is initialized from the result of calling copyString().
+    // But copying a string allocates memory, which can trigger a GC. If the collector ran at just
+    // the wrong time, it would read vm.initString before it had been initialized. So, first we zero
+    // the field out.
+    vm.initString = NULL;
+    // init: initialize class instance
+    vm.initString = copyString("init", 4);
     defineNative("clock", clockNative);
 }
 
 void freeVM() {
     freeTable(&vm.globals);
     freeTable(&vm.strings);
+    vm.initString = NULL;
     freeObjects();
 }
 
@@ -528,6 +562,11 @@ static bool call(ObjClosure* closure, int argCount) {
 static bool callValue(Value callee, int argCount) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
+            case OBJ_BOUND_METHOD: {
+                ObjBoundMethod* bound = AS_BOUND_METHOD(callee);
+                vm.stackTop[-argCount - 1] = bound->receiver;
+                return call(bound->method, argCount);
+            }
             case OBJ_CLASS: {
                 // When you call a class like var b = Brioche(1, 2);:
                 // The stack initially holds: [ ... | Brioche (class) | arg1 | arg2 ].
@@ -538,6 +577,14 @@ static bool callValue(Value callee, int argCount) {
                 // in place for any constructor/initializer method that runs afterward.
                 ObjClass* klass = AS_CLASS(callee);
                 vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+                // Invoking initializers
+                Value initializer;
+                if (tableGet(&klass->methods, vm.initString, &initializer)) {
+                    return call(AS_CLOSURE(initializer), argCount);
+                } else if (argCount != 0) {
+                    runtimeError("Expected 0 arguments but got %d.", argCount);
+                    return false;
+                }
                 return true;
             }
                 // case OBJ_FUNCTION:
@@ -562,6 +609,47 @@ static bool callValue(Value callee, int argCount) {
     }
     runtimeError("Can only call functions and classes.");
     return false;
+}
+
+static bool invokeFromClass(ObjClass* klass, ObjString* name, int argCount) {
+    Value method;
+    if (!tableGet(&klass->methods, name, &method)) {
+        runtimeError("Undefined property '%s'.", name->chars);
+        return false;
+    }
+    return call(AS_CLOSURE(method), argCount);
+}
+
+static bool invoke(ObjString* name, int argCount) {
+    Value receiver = peek(argCount);
+    if (!IS_INSTANCE(receiver)) {
+        runtimeError("Only instances have methods.");
+        return false;
+    }
+    ObjInstance* instance = AS_INSTANCE(receiver);
+
+    // Pretty simple fix. Before looking up a method on the instance’s class, we look for a field
+    // with the same name. If we find a field, then we store it on the stack in place of the
+    // receiver, under the argument list. This is how OP_GET_PROPERTY behaves since the latter
+    // instruction executes before a subsequent parenthesized list of arguments has been evaluated.
+    Value value;
+    if (tableGet(&instance->fields, name, &value)) {
+        vm.stackTop[-argCount - 1] = value;
+        return callValue(value, argCount);
+    }
+    return invokeFromClass(instance->klass, name, argCount);
+}
+
+static bool bindMethod(ObjClass* klass, ObjString* name) {
+    Value method;
+    if (!tableGet(&klass->methods, name, &method)) {
+        runtimeError("Undefined property '%s'.", name->chars);
+        return false;
+    }
+    ObjBoundMethod* bound = newBoundMethod(peek(0), AS_CLOSURE(method));
+    pop();
+    push(OBJ_VAL(bound));
+    return true;
 }
 
 static ObjUpvalue* captureUpvalue(Value* local) {
@@ -592,8 +680,6 @@ static ObjUpvalue* captureUpvalue(Value* local) {
     return createdUpvalue;
 }
 
-static bool isFalsy(Value value) { return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value)); }
-
 static void closeUpvalues(Value* last) {
     while (vm.openUpvalues != NULL && vm.openUpvalues->location >= last) {
         ObjUpvalue* upvalue = vm.openUpvalues;
@@ -602,6 +688,15 @@ static void closeUpvalues(Value* last) {
         vm.openUpvalues = upvalue->next;
     }
 }
+
+static void defineMethod(ObjString* name) {
+    Value method = peek(0);
+    ObjClass* klass = AS_CLASS(peek(1));
+    tableSet(&klass->methods, name, method);
+    pop();
+}
+
+static bool isFalsy(Value value) { return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value)); }
 
 static void concatenate() {
     // If we pop these, now with GC these could very well be sweeped

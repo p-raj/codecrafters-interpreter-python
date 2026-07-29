@@ -48,6 +48,8 @@ typedef struct {
     // In order to reliably deduplicate all strings, the VM needs to be able to find every string
     // that’s created
     Table strings;
+    // init() function - class initializer
+    ObjString* initString;
     // to make sure all the defined closure close over VARIABLE and not VALUE
     // SHARE VARIABLES
     ObjUpvalue* openUpvalues;

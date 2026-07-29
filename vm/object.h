@@ -7,6 +7,7 @@
 #include "value.h"
 
 typedef enum {
+    OBJ_BOUND_METHOD,
     OBJ_CLASS,
     OBJ_CLOSURE,
     OBJ_FUNCTION,
@@ -19,6 +20,7 @@ typedef enum {
 // extract the type of object
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
+#define IS_BOUND_METHOD(value) isObjType(value, OBJ_BOUND_METHOD)
 #define IS_CLASS(value) isObjType(value, OBJ_CLASS)
 #define IS_CLOSURE(value) isObjType(value, OBJ_CLOSURE)
 #define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
@@ -26,6 +28,7 @@ typedef enum {
 #define IS_NATIVE(value) isObjType(value, OBJ_NATIVE)
 #define IS_STRING(value) isObjType(value, OBJ_STRING)
 
+#define AS_BOUND_METHOD(value) ((ObjBoundMethod*)AS_OBJ(value))
 #define AS_CLASS(value) ((ObjClass*)AS_OBJ(value))
 #define AS_CLOSURE(value) ((ObjClosure*)AS_OBJ(value))
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
@@ -104,6 +107,7 @@ typedef struct {
 typedef struct {
     Obj obj;
     ObjString* name;
+    Table methods;
 } ObjClass;
 
 typedef struct {
@@ -112,6 +116,21 @@ typedef struct {
     Table fields;
 } ObjInstance;
 
+// When the user executes a method access, we’ll find the closure for that method and wrap it in a
+// new “bound method” object that tracks the instance that the method was accessed from. This bound
+// object can be called later like a function. When invoked, the VM will do some shenanigans to wire
+// up this to point to the receiver inside the method’s body.
+// It wraps the receiver and the method closure together. The receiver’s type is Value even though
+// methods can be called only on ObjInstances. Since the VM doesn’t care what kind of receiver it
+// has anyway, using Value means we don’t have to keep converting the pointer back to a Value when
+// it gets passed to more general functions.
+typedef struct {
+    Obj obj;
+    Value receiver;
+    ObjClosure* method;
+} ObjBoundMethod;
+
+ObjBoundMethod* newBoundMethod(Value receiver, ObjClosure* method);
 ObjClass* newClass(ObjString* name);
 ObjClosure* newClosure(ObjFunction* function);
 ObjFunction* newFunction();

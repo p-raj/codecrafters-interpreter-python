@@ -63,6 +63,10 @@ typedef enum {
     OP_LOOP,
     // function call
     OP_CALL,
+    // In other words, this single instruction combines the operands of the OP_GET_PROPERTY and
+    // OP_CALL instructions it replaces, in that order. It really is a fusion of those two
+    // instructions.
+    OP_INVOKE,
     // it takes a single operand that represents a constant table index for the function.
     // it wraps the function
     OP_CLOSURE,
@@ -73,6 +77,7 @@ typedef enum {
     // pops off the last stack value and returns
     OP_RETURN,
     OP_CLASS,
+    OP_METHOD,
 } OpCode;
 
 // Bytecode is a series of instructions.

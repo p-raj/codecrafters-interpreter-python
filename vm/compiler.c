@@ -78,7 +78,7 @@ typedef struct {
     bool isLocal;
 } Upvalue;
 
-typedef enum { TYPE_FUNCTION, TYPE_SCRIPT } FunctionType;
+typedef enum { TYPE_FUNCTION, TYPE_INITIALIZER, TYPE_METHOD, TYPE_SCRIPT } FunctionType;
 
 typedef struct Compiler {
     // Functions nest by default
@@ -121,8 +121,21 @@ typedef struct Compiler {
     int scopeDepth;
 } Compiler;
 
+// Right now we store only a pointer to the ClassCompiler for the enclosing class, if any. Nesting a
+// class declaration inside a method in some other class is an uncommon thing to do, but Lox
+// supports it. Just like the Compiler struct, this means ClassCompiler forms a linked list from the
+// current innermost class being compiled out through all of the enclosing classes.
+typedef struct ClassCompiler {
+    struct ClassCompiler* enclosing;
+} ClassCompiler;
+
 Parser parser;
 Compiler* current = NULL;
+// resolving this when Nested
+// or when not insite an instance
+// This module variable points to a struct representing the current, innermost class being compiled.
+// The new type looks like this:
+ClassCompiler* currentClass = NULL;
 Chunk* compilingChunk;
 
 static Chunk* currentChunk() {
@@ -213,7 +226,12 @@ static void emitReturn() {
     // Note that we assume here that the function did actually return a value
     // but thats not always the case
     // so the implicit return is NIL VALUE
-    emitByte(OP_NIL);
+    // emitByte(OP_NIL);
+    if (current->type == TYPE_INITIALIZER) {
+        emitBytes(OP_GET_LOCAL, 0);
+    } else {
+        emitByte(OP_NIL);
+    }
     emitByte(OP_RETURN);
 }
 
@@ -257,8 +275,24 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
     Local* local = &current->locals[current->localCount++];
     local->depth = 0;
     local->isCaptured = false;
-    local->name.start = "";
-    local->name.length = 0;
+    // local->name.start = "";
+    // local->name.length = 0;
+    // For function calls, that slot ends up holding the function being called. Since the slot has
+    // no name, the function body never accesses it. You can guess where this is going. For method
+    // calls, we can repurpose that slot to store the receiver. Slot zero will store the instance
+    // that this is bound to. In order to compile this expressions, the compiler simply needs to
+    // give the correct name to that local variable.
+    if (type != TYPE_FUNCTION) {
+        local->name.start = "this";
+        local->name.length = 4;
+    } else {
+        // We want to do this only for methods. Function declarations don’t have a this. And, in
+        // fact, they must not declare a variable named “this”, so that if you write a this
+        // expression inside a function declaration which is itself inside a method, the this
+        // correctly resolves to the outer method’s receiver.
+        local->name.start = "";
+        local->name.length = 0;
+    }
 }
 
 static ObjFunction* endCompiler() {
@@ -566,6 +600,28 @@ static void namedVariable(Token name, bool canAssign) {
 
 static void variable(bool canAssign) { namedVariable(parser.previous, canAssign); }
 
+static void this_(bool canAssign) {
+    // print this; // At top level.
+    // fun notMethod() {
+    //   print this; // In a function.
+    // }
+    if (currentClass == NULL) {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+    // We’ll apply the same implementation technique for this in clox that we used in jlox. We treat
+    // this as a lexically scoped local variable whose value gets magically initialized. Compiling
+    // it like a local variable means we get a lot of behavior for free. In particular, closures
+    // inside a method that reference this will do the right thing and capture the receiver in an
+    // upvalue.
+    // When the parser function is called, the this token has just been consumed and is stored as
+    // the previous token. We call our existing variable() function which compiles identifier
+    // expressions as variable accesses. It takes a single Boolean parameter for whether the
+    // compiler should look for a following = operator and parse a setter. You can’t assign to this,
+    // so we pass false to disallow that.
+    variable(false);
+}
+
 static void unary(bool canAssign) {
     TokenType operatorType = parser.previous.type;
 
@@ -668,6 +724,38 @@ static void dot(bool canAssign) {
     if (canAssign && match(TOKEN_EQUAL)) {
         expression();
         emitBytes(OP_SET_PROPERTY, name);
+    } else if (match(TOKEN_LEFT_PAREN)) {
+        // Lox’s semantics define a method invocation as two operations—accessing the method and
+        // then calling the result. Our VM must support those as separate operations because the
+        // user can separate them. You can access a method without calling it and then invoke the
+        // bound method later. Nothing we’ve implemented so far is unnecessary.
+        // But always executing those as separate operations has a significant cost. Every single
+        // time a Lox program accesses and invokes a method, the runtime heap allocates a new
+        // ObjBoundMethod, initializes its fields, then pulls them right back out. Later, the GC has
+        // to spend time freeing all of those ephemeral bound methods.
+        // Most of the time, a Lox program accesses a method and then immediately calls it. The
+        // bound method is created by one bytecode instruction and then consumed by the very next
+        // one. In fact, it’s so immediate that the compiler can even textually see that it’s
+        // happening—a dotted property access followed by an opening parenthesis is most likely a
+        // method call.
+        // Since we can recognize this pair of operations at compile time, we have the opportunity
+        // to emit a new, special instruction that performs an optimized method call. If you spend
+        // enough time watching your bytecode VM run, you’ll notice it often executes the same
+        // series of bytecode instructions one after the other. A classic optimization technique is
+        // to define a new single instruction called a superinstruction that fuses those into a
+        // single instruction with the same behavior as the entire sequence. One of the largest
+        // performance drains in a bytecode interpreter is the overhead of decoding and dispatching
+        // each instruction. Fusing several instructions into one eliminates some of that. The
+        // challenge is determining which instruction sequences are common enough to benefit from
+        // this optimization. Every new superinstruction claims an opcode for its own use and there
+        // are only so many of those to go around. Add too many, and you’ll need a larger encoding
+        // for opcodes, which then increases code size and makes decoding all instructions slower.
+        uint8_t argCount = argumentList();
+        // In other words, this single instruction combines the operands of the OP_GET_PROPERTY and
+        // OP_CALL instructions it replaces, in that order. It really is a fusion of those two
+        // instructions. Let’s define it.
+        emitBytes(OP_INVOKE, name);
+        emitByte(argCount);
     } else {
         emitBytes(OP_GET_PROPERTY, name);
     }
@@ -725,7 +813,10 @@ ParseRule rules[] = {
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
   [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
-  [TOKEN_THIS]          = {NULL,     NULL,   PREC_NONE},
+  // The underscore at the end of the name of the parser function is
+  // because this is a reserved word in C++ and we support compiling clox as C++.
+  // same as class -> klass
+  [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
   [TOKEN_TRUE]          = {literal,     NULL,   PREC_NONE},
   [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},
   [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
@@ -904,6 +995,9 @@ static void returnStatement() {
         // this sets up the NIL value on the stack
         emitReturn();
     } else {
+        if (current->type == TYPE_INITIALIZER) {
+            error("Can't return a value from an initializer.");
+        }
         // The return value expression is optional, so the parser looks for a semicolon token to
         // tell if a value was provided. If there is no return value, the statement implicitly
         // returns nil. We implement that by calling emitReturn(), which emits an OP_NIL
@@ -1028,16 +1122,49 @@ static void function(FunctionType type) {
     }
 }
 
+static void method() {
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    uint8_t constant = identifierConstant(&parser.previous);
+    FunctionType type = TYPE_METHOD;
+    // The user’s invocation on the class to create the instance will complete whenever that
+    // initializer method returns, and will leave on the stack whatever value the initializer puts
+    // there. That means that unless the user takes care to put return this; at the end of the
+    // initializer, no instance will come out.
+    if (parser.previous.length == 4 && memcmp(parser.previous.start, "init", 4) == 0) {
+        type = TYPE_INITIALIZER;
+    }
+    function(type);
+    emitBytes(OP_METHOD, constant);
+}
+
 static void classDeclaration() {
     consume(TOKEN_IDENTIFIER, "Expect a class name.");
+    Token className = parser.previous;
     uint8_t nameConstant = identifierConstant(&parser.previous);
     declareVariable();
 
     emitBytes(OP_CLASS, nameConstant);
     defineVariable(nameConstant);
 
+    // If we aren’t inside any class declaration at all, the module variable currentClass is NULL.
+    // When the compiler begins compiling a class, it pushes a new ClassCompiler onto that implicit
+    // linked stack.
+    ClassCompiler classCompiler;
+    classCompiler.enclosing = currentClass;
+    currentClass = &classCompiler;
+
+    // That helper function generates code to load a variable with the given name onto the stack.
+    namedVariable(className, false);
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        method();
+    }
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+    // This means that when we execute each OP_METHOD instruction, the stack has the method’s
+    // closure on top with the class right under it. Once we’ve reached the end of the methods, we
+    // no longer need the class and tell the VM to pop it off the stack.
+    emitByte(OP_POP);
+    currentClass = currentClass->enclosing;
 }
 
 static void funDeclaration() {
